@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  # 1. The Database 🗄️
+  postgres:
+    image: postgres:15
+    container_name: sync_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: sync_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. The Real-Time Engine ⚡
+  redis:
+    image: redis:alpine
+    container_name: sync_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    # This command turns on persistence (saving to disk)
+    command: redis-server --save 60 1 --loglevel warning
+
+volumes:
+  postgres_data:
