@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. The Database 🗄️
+  # 1. The Database 
   postgres:
     image: postgres:15
     container_name: sync_postgres
@@ -16,7 +16,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  # 2. The Real-Time Engine ⚡
+  # 2. The Real-Time Engine
   redis:
     image: redis:alpine
     container_name: sync_redis
