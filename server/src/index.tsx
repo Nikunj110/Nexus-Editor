@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { Socket } from "dgram";
+import redisClient from "./config/redis.js";
 
 dotenv.config();
 
@@ -23,16 +23,23 @@ app.use(express.json());
 
 app.use(cors());
 
-
 io.on("connection", (socket) => {
     console.log("User Connected ", socket.id);
 
-    socket.on("message", (msg) => {
-        console.log(msg);
+    //for Joining the Room
+
+    socket.on("join-room", (documentId) => {
+        socket.join(documentId);
+        console.log(`User ${socket.id} joined room: ${documentId}`)
     })
 
+    // When a user types, they send "code-change". We broadcast it to the room.
+    socket.on("code-change",({documentId,code})=>{
+        // .to(room) sends to everyone in that room EXCEPT the sender
+        socket.to(documentId).emit("code-update",code);
+    });
 
-    socket.on("disconnected", () => {
+    socket.on("disconnect", () => {
         console.log("User disConnected ", socket.id);
 
     })
@@ -44,6 +51,17 @@ app.get("/", (req: Request, res: Response) => {
     });
 })
 
-httpServer.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-})
+const startServer = async () => {
+    try {
+        await redisClient.connect();
+
+        httpServer.listen(PORT, () => {
+            console.log(`Server is running on port ${PORT}`);
+        })
+
+    } catch (error) {
+        console.error("Failed to start server: ", error);
+    }
+}
+
+startServer();
