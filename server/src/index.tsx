@@ -28,15 +28,34 @@ io.on("connection", (socket) => {
 
     //for Joining the Room
 
-    socket.on("join-room", (documentId) => {
+    socket.on("join-room", async (documentId) => {
         socket.join(documentId);
         console.log(`User ${socket.id} joined room: ${documentId}`)
+        //When New User Joins the Room Show The Data Of That rooms Which Are Already on redis
+        try {
+            const storeCode = await redisClient.get(documentId);
+
+            if (storeCode) {
+                socket.emit("load-document", storeCode);
+            }
+
+        } catch (error) {
+            console.error("Redis Get Error : ", error);
+        }
     })
 
     // When a user types, they send "code-change". We broadcast it to the room.
-    socket.on("code-change",({documentId,code})=>{
+    socket.on("code-change", async ({ documentId, code }) => {
         // .to(room) sends to everyone in that room EXCEPT the sender
-        socket.to(documentId).emit("code-update",code);
+        socket.to(documentId).emit("code-update", code);
+
+        try {
+            // 'EX' sets an expiration time (e.g., 1 day) so unused keys eventually clear up
+            // You can remove 'EX', 86400 if you want it to persist forever until manually deleted
+            await redisClient.set(documentId, code, { EX: 86400 });
+        } catch (error) {
+            console.error("Redis Set Error:", error);
+        }
     });
 
     socket.on("disconnect", () => {
