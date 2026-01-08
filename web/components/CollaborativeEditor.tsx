@@ -10,7 +10,7 @@ const useSocket = (documentId: string) => {
   useEffect(() => {
     // 1. Connect to Server
     // Make sure this matches your backend URL
-    const s = io("http://localhost:3000"); 
+    const s = io("http://localhost:3000");
     setSocket(s);
 
     // 2. Join the Room
@@ -29,9 +29,21 @@ interface CollaborativeEditorProps {
   documentId: string;
 }
 
+const LANGUAGES = [
+  "javascript",
+  "typescript",
+  "python",
+  "java",
+  "cpp",
+  "html",
+  "css",
+  "json"
+];
+
 const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   const socket = useSocket(documentId);
   const [content, setContent] = useState("");
+  const [language, setLanguage] = useState("javascript");
 
   // 3. Listen for incoming code updates from others
   useEffect(() => {
@@ -51,12 +63,21 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
       setContent(storedCode);
     };
 
+    const handleLanguageUpdate = async (newLanguage: string) => {
+      console.log("Language Updated to : ", newLanguage);
+      setLanguage(newLanguage);
+
+
+    }
+
     socket.on("code-update", handleCodeUpdate);
     socket.on("load-document", handleLoadDocument);
+    socket.on("language-change", handleLanguageUpdate);
 
     return () => {
       socket.off("code-update", handleCodeUpdate);
       socket.off("load-document", handleLoadDocument);
+      socket.off("language-change", handleLanguageUpdate);
     };
   }, [socket]);
 
@@ -64,7 +85,7 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   // const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
   //    const newCode = e.target.value;
   //    setContent(newCode);
-     
+
   //    // Emit to server
   //    if (socket) {
   //       socket.emit("code-change", { documentId, code: newCode });
@@ -74,26 +95,56 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   // 2. Handle Monaco Changes
   // Monaco gives us the value directly, we don't need "e.target.value"
   const handleEditorChange = (value: string | undefined) => {
-     if (value !== undefined) {
-        setContent(value);
-        if (socket) {
-           socket.emit("code-change", { documentId, code: value });
-        }
-     }
+    if (value !== undefined) {
+      setContent(value);
+      if (socket) {
+        socket.emit("code-change", { documentId, code: value });
+      }
+    }
   }
+
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+
+    const newLanguage = e.target.value;
+    setLanguage(newLanguage);
+
+    // Telling the server we changed the language
+    if (socket) {
+      socket.emit("language-change", { documentId, language: newLanguage });
+    }
+  }
+
+
 
   // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
  return (
-    <div style={{ height: "90vh", border: "1px solid #333" }}>
-        {/* 3. The Real Editor Component */}
+    <div style={{ height: "90vh", display: "flex", flexDirection: "column", border: "1px solid #333" }}>
+        
+        {/* Toolbar Section */}
+        <div style={{ padding: "10px", background: "#1e1e1e", borderBottom: "1px solid #333" }}>
+            <span style={{ color: "#fff", marginRight: "10px" }}>Language:</span>
+            <select 
+                value={language} 
+                onChange={handleLanguageChange}
+                style={{ padding: "5px", borderRadius: "4px" }}
+            >
+                {LANGUAGES.map((lang) => (
+                    <option key={lang} value={lang}>
+                        {lang.toUpperCase()}
+                    </option>
+                ))}
+            </select>
+        </div>
+
+        {/* Editor Section */}
         <Editor
             height="100%"
-            defaultLanguage="javascript"
-            theme="vs-dark" 
+            language={language} // Pass the dynamic language here
+            theme="vs-dark"
             value={content}
             onChange={handleEditorChange} 
             options={{
-                minimap: { enabled: false }, // Hides the mini-map to save space
+                minimap: { enabled: false },
                 fontSize: 14,
             }}
         />

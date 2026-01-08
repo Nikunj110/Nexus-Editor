@@ -58,6 +58,18 @@ io.on("connection", (socket) => {
         }
     });
 
+    //Handle Language Changes
+    socket.on("language-change", async ({ documentId, language }) => {
+        // 1. Broadcast to everyone else in the room
+        socket.to(documentId).emit("language-update", language);
+        //2. we are doing that store  language in redis
+        try {
+            await redisClient.set(`${documentId}-language`, language, { EX: 86400 })
+        } catch (error) {
+            console.error("Redis Language Set Error:", error);
+        }
+    })
+
     socket.on("disconnect", () => {
         console.log("User disConnected ", socket.id);
 
