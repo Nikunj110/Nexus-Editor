@@ -1,7 +1,7 @@
 "use client"
 import React, { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
-// import MonacoEditor from "@monaco-editor/react"; // If you use Monaco
+import Editor from "@monaco-editor/react"
 // import ReactQuill from "react-quill"; // If you use Quill
 
 const useSocket = (documentId: string) => {
@@ -38,13 +38,16 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
     if (!socket) return;
 
     const handleCodeUpdate = (newCode: string) => {
-      console.log("Remote change received:", newCode);
-      // Update state without triggering a loop 
-      setContent(newCode); 
+      // console.log("Remote change received:", newCode);
+      // // Update state without triggering a loop 
+      // setContent(newCode); 
+      // Only update if the content is actually different
+      // This helps prevent some cursor jumping issues
+      setContent((prev) => (prev !== newCode ? newCode : prev));
     };
 
     const handleLoadDocument = (storedCode: string) => {
-      console.log("Initial code loaded:", storedCode);
+      // console.log("Initial code loaded:", storedCode);
       setContent(storedCode);
     };
 
@@ -58,26 +61,41 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   }, [socket]);
 
   // 4. Handle changes when YOU type
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-     const newCode = e.target.value;
-     setContent(newCode);
+  // const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  //    const newCode = e.target.value;
+  //    setContent(newCode);
      
-     // Emit to server
-     if (socket) {
-        socket.emit("code-change", { documentId, code: newCode });
+  //    // Emit to server
+  //    if (socket) {
+  //       socket.emit("code-change", { documentId, code: newCode });
+  //    }
+  // }
+
+  // 2. Handle Monaco Changes
+  // Monaco gives us the value directly, we don't need "e.target.value"
+  const handleEditorChange = (value: string | undefined) => {
+     if (value !== undefined) {
+        setContent(value);
+        if (socket) {
+           socket.emit("code-change", { documentId, code: value });
+        }
      }
   }
 
   // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
-  return (
-    <div style={{ padding: '20px' }}>
-        <h3>Room: {documentId}</h3>
-        <textarea 
+ return (
+    <div style={{ height: "90vh", border: "1px solid #333" }}>
+        {/* 3. The Real Editor Component */}
+        <Editor
+            height="100%"
+            defaultLanguage="javascript"
+            theme="vs-dark" 
             value={content}
-            onChange={handleChange}
-            rows={20}
-            cols={80}
-            style={{ width: '100%', fontFamily: 'monospace' }}
+            onChange={handleEditorChange} 
+            options={{
+                minimap: { enabled: false }, // Hides the mini-map to save space
+                fontSize: 14,
+            }}
         />
     </div>
   );
