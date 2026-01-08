@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+"use client"
+import React, { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
 // import MonacoEditor from "@monaco-editor/react"; // If you use Monaco
 // import ReactQuill from "react-quill"; // If you use Quill
@@ -9,7 +10,7 @@ const useSocket = (documentId: string) => {
   useEffect(() => {
     // 1. Connect to Server
     // Make sure this matches your backend URL
-    const s = io("http://localhost:3001"); 
+    const s = io("http://localhost:3000"); 
     setSocket(s);
 
     // 2. Join the Room
