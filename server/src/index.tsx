@@ -34,9 +34,14 @@ io.on("connection", (socket) => {
         //When New User Joins the Room Show The Data Of That rooms Which Are Already on redis
         try {
             const storeCode = await redisClient.get(documentId);
+            const storedLanguage = await redisClient.get(`${documentId}-language`);
 
             if (storeCode) {
                 socket.emit("load-document", storeCode);
+            }
+
+            if (storedLanguage) {
+                socket.emit("language-update",storedLanguage);
             }
 
         } catch (error) {

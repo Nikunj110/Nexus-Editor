@@ -9,8 +9,8 @@ const useSocket = (documentId: string) => {
 
   useEffect(() => {
     // 1. Connect to Server
-    // Make sure this matches your backend URL
-    const s = io("http://localhost:3000");
+    // Make sure this matches your backend URL (Fixed to 3001)
+    const s = io("http://localhost:3001");
     setSocket(s);
 
     // 2. Join the Room
@@ -42,7 +42,7 @@ const LANGUAGES = [
 
 const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   const socket = useSocket(documentId);
-  const [content, setContent] = useState("");
+  const [content, setContent] = useState("// Start coding...");
   const [language, setLanguage] = useState("javascript");
 
   // 3. Listen for incoming code updates from others
@@ -63,21 +63,20 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
       setContent(storedCode);
     };
 
-    const handleLanguageUpdate = async (newLanguage: string) => {
+    const handleLanguageUpdate = (newLanguage: string) => {
       console.log("Language Updated to : ", newLanguage);
       setLanguage(newLanguage);
-
-
-    }
+    };
 
     socket.on("code-update", handleCodeUpdate);
     socket.on("load-document", handleLoadDocument);
-    socket.on("language-change", handleLanguageUpdate);
+ 
+    socket.on("language-update", handleLanguageUpdate);
 
     return () => {
       socket.off("code-update", handleCodeUpdate);
       socket.off("load-document", handleLoadDocument);
-      socket.off("language-change", handleLanguageUpdate);
+      socket.off("language-update", handleLanguageUpdate);
     };
   }, [socket]);
 
@@ -104,20 +103,18 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   }
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-
     const newLanguage = e.target.value;
     setLanguage(newLanguage);
 
     // Telling the server we changed the language
     if (socket) {
+      // Backend listens for "language-change"
       socket.emit("language-change", { documentId, language: newLanguage });
     }
   }
 
-
-
   // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
- return (
+  return (
     <div style={{ height: "90vh", display: "flex", flexDirection: "column", border: "1px solid #333" }}>
         
         {/* Toolbar Section */}
