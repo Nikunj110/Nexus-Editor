@@ -26,11 +26,20 @@ app.use(cors());
 io.on("connection", (socket) => {
     console.log("User Connected ", socket.id);
 
+
+
     //for Joining the Room
 
     socket.on("join-room", async (documentId) => {
         socket.join(documentId);
         console.log(`User ${socket.id} joined room: ${documentId}`)
+
+        //Updates the User Counts on join
+        const sockets = await io.in(documentId).fetchSockets();
+
+        // Broadcast the count to everyone in the room (including the new user)
+        io.to(documentId).emit("user-count-update", sockets.length);
+
         //When New User Joins the Room Show The Data Of That rooms Which Are Already on redis
         try {
             const storeCode = await redisClient.get(documentId);
@@ -41,7 +50,7 @@ io.on("connection", (socket) => {
             }
 
             if (storedLanguage) {
-                socket.emit("language-update",storedLanguage);
+                socket.emit("language-update", storedLanguage);
             }
 
         } catch (error) {
@@ -75,10 +84,23 @@ io.on("connection", (socket) => {
         }
     })
 
-    socket.on("disconnect", () => {
-        console.log("User disConnected ", socket.id);
+    socket.on("disconnecting", async () => {
+        console.log("User disConnecting ", socket.id);
+        // socket.rooms contains the rooms the user is in.
+        // We loop through them to notify others they left.
+        for (const room of socket.rooms) {
+            if (room !== socket.id) {
+                // We emit to the room *before* they officially leave the socket list, 
+                // so we calculate count - 1
+                const sockets = await io.in(room).fetchSockets();
+                io.to(room).emit("user-count-update", sockets.length - 1);
+            }
+        }
 
     })
+    socket.on("disconnect", () => {
+        console.log("User disconnected ", socket.id);
+    });
 })
 
 app.get("/", (req: Request, res: Response) => {
