@@ -44,6 +44,8 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   const socket = useSocket(documentId);
   const [content, setContent] = useState("// Start coding...");
   const [language, setLanguage] = useState("javascript");
+const [userCount, setUserCount] = useState(0);
+
 
   // 3. Listen for incoming code updates from others
   useEffect(() => {
@@ -56,6 +58,12 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
       // Only update if the content is actually different
       // This helps prevent some cursor jumping issues
       setContent((prev) => (prev !== newCode ? newCode : prev));
+    };
+
+    const handleUserCount = (count: number) => {
+        console.log("Users online:", count);
+        setUserCount(count);
+        //cnt How manyuser Online
     };
 
     const handleLoadDocument = (storedCode: string) => {
@@ -72,11 +80,13 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
     socket.on("load-document", handleLoadDocument);
  
     socket.on("language-update", handleLanguageUpdate);
+    socket.on("user-count-update", handleUserCount);  
 
     return () => {
       socket.off("code-update", handleCodeUpdate);
       socket.off("load-document", handleLoadDocument);
       socket.off("language-update", handleLanguageUpdate);
+      socket.off("user-count-update", handleUserCount);
     };
   }, [socket]);
 
@@ -118,32 +128,38 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
     <div style={{ height: "90vh", display: "flex", flexDirection: "column", border: "1px solid #333" }}>
         
         {/* Toolbar Section */}
-        <div style={{ padding: "10px", background: "#1e1e1e", borderBottom: "1px solid #333" }}>
-            <span style={{ color: "#fff", marginRight: "10px" }}>Language:</span>
-            <select 
-                value={language} 
-                onChange={handleLanguageChange}
-                style={{ padding: "5px", borderRadius: "4px" }}
-            >
-                {LANGUAGES.map((lang) => (
-                    <option key={lang} value={lang}>
-                        {lang.toUpperCase()}
-                    </option>
-                ))}
-            </select>
+        <div style={{ padding: "10px", background: "#1e1e1e", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            
+            {/* Left side: Language Selector */}
+            <div>
+                <span style={{ color: "#fff", marginRight: "10px" }}>Language:</span>
+                <select 
+                    value={language} 
+                    onChange={handleLanguageChange}
+                    style={{ padding: "5px", borderRadius: "4px" }}
+                >
+                    {LANGUAGES.map((lang) => (
+                        <option key={lang} value={lang}>{lang.toUpperCase()}</option>
+                    ))}
+                </select>
+            </div>
+
+            {/* Right side: User Count */}
+            <div style={{ color: "#4caf50", fontWeight: "bold" }}>
+                🟢 {userCount} User{userCount !== 1 ? 's' : ''} Online
+            </div>
+
         </div>
 
         {/* Editor Section */}
         <Editor
-            height="100%"
-            language={language} // Pass the dynamic language here
-            theme="vs-dark"
-            value={content}
-            onChange={handleEditorChange} 
-            options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-            }}
+            // ... (Keep existing Editor props) ...
+             height="100%"
+             language={language}
+             theme="vs-dark"
+             value={content}
+             onChange={handleEditorChange} 
+             options={{ minimap: { enabled: false }, fontSize: 14 }}
         />
     </div>
   );
