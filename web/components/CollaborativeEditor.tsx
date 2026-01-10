@@ -207,6 +207,24 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
 return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#1e1e1e", overflow: "hidden" }}>
       
+      {/* --- FIX 1: Invisible Overlay --- 
+          This covers the WHOLE screen only when dragging. 
+          It catches all mouse events so the Editor doesn't steal them. 
+      */}
+      {isDragging && (
+        <div 
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 9999,
+            cursor: "row-resize"
+          }} 
+        />
+      )}
+
       {/* Toolbar */}
       <div style={{ 
           padding: "10px 20px", 
@@ -254,10 +272,19 @@ return (
         </div>
       </div>
 
-      {/* Main Content: Flex container filling remaining space */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative" }}>
+      {/* Main Content */}
+      <div 
+        style={{ 
+           flex: 1, 
+           display: "flex", 
+           flexDirection: "column", 
+           position: "relative",
+           // --- FIX 2: Disable text selection while dragging ---
+           userSelect: isDragging ? "none" : "auto" 
+        }}
+      >
         
-        {/* Editor Area: Grows to fill available space above terminal */}
+        {/* Editor Area */}
         <div style={{ flex: 1, minHeight: 0 }}> 
            <Editor
              height="100%"
@@ -269,19 +296,19 @@ return (
            />
         </div>
 
-        {/* --- NEW: Draggable Handle --- */}
+        {/* Draggable Handle */}
         <div 
            onMouseDown={startDragging}
            style={{
-              height: "5px",
+              height: "8px", // Made slightly thicker for easier grabbing
               background: isDragging ? "#007acc" : "#333",
               cursor: "row-resize",
-              zIndex: 10,
+              zIndex: 50, // Higher than editor
               transition: "background 0.2s"
            }}
         />
 
-        {/* Terminal Area: Fixed height based on state */}
+        {/* Terminal Area */}
         <div style={{ 
             height: `${terminalHeight}px`, 
             background: "#1e1e1e", 
