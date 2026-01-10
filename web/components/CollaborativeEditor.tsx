@@ -1,25 +1,19 @@
-"use client"
+"use client";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 import Editor from "@monaco-editor/react";
 import axios from "axios";
 
-
-// import ReactQuill from "react-quill"; // If you use Quill
-
+// --- 1. SOCKET CONNECTION HOOK ---
 const useSocket = (documentId: string) => {
   const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    // 1. Connect to Server
-    // Make sure this matches your backend URL (Fixed to 3001)
+    // Connect to backend
     const s = io("http://localhost:3001");
     setSocket(s);
-
-    // 2. Join the Room
     s.emit("join-room", documentId);
 
-    // Cleanup on unmount
     return () => {
       s.disconnect();
     };
@@ -28,10 +22,7 @@ const useSocket = (documentId: string) => {
   return socket;
 };
 
-interface CollaborativeEditorProps {
-  documentId: string;
-}
-
+// --- CONSTANTS ---
 const LANGUAGES_VERSIONS: Record<string, string> = {
   javascript: "18.15.0",
   typescript: "5.0.3",
@@ -40,8 +31,11 @@ const LANGUAGES_VERSIONS: Record<string, string> = {
   csharp: "6.12.0",
   php: "8.2.3",
 };
-
 const LANGUAGES = Object.keys(LANGUAGES_VERSIONS);
+
+interface CollaborativeEditorProps {
+  documentId: string;
+}
 
 const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   const socket = useSocket(documentId);
@@ -49,51 +43,32 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   const [language, setLanguage] = useState("javascript");
   const [userCount, setUserCount] = useState(0);
 
-  //State For Execution Output
+  // Execution State
   const [output, setOutput] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
 
-  //resizable Terminal State
-  const [terminalHeight, setTerminalHeight] = useState(250) // Default height in pixels
+  // --- RESIZE STATE (The logic for the Terminal) ---
+  const [terminalHeight, setTerminalHeight] = useState(250); // Start at 250px
   const [isDragging, setIsDragging] = useState(false);
+  
+  // We use a Ref for dragging so the 'mousemove' event listener 
+  // can see the current value without needing a React re-render loop.
+  const isDraggingRef = useRef(false);
 
-  // Helper to sync editor content without cursor jumping
-  const editorRef = useRef<any>(null);
-
-
-
-  // 3. Listen for incoming code updates from others
+  // --- SOCKET LISTENERS ---
   useEffect(() => {
     if (!socket) return;
 
     const handleCodeUpdate = (newCode: string) => {
-      // console.log("Remote change received:", newCode);
-      // // Update state without triggering a loop 
-      // setContent(newCode); 
-      // Only update if the content is actually different
-      // This helps prevent some cursor jumping issues
+      // Only update if different to prevent cursor jumps
       setContent((prev) => (prev !== newCode ? newCode : prev));
     };
-
-    const handleUserCount = (count: number) => {
-      console.log("Users online:", count);
-      setUserCount(count);
-      //cnt How manyuser Online
-    };
-
-    const handleLoadDocument = (storedCode: string) => {
-      // console.log("Initial code loaded:", storedCode);
-      setContent(storedCode);
-    };
-
-    const handleLanguageUpdate = (newLanguage: string) => {
-      console.log("Language Updated to : ", newLanguage);
-      setLanguage(newLanguage);
-    };
+    const handleUserCount = (count: number) => setUserCount(count);
+    const handleLoadDocument = (storedCode: string) => setContent(storedCode);
+    const handleLanguageUpdate = (newLanguage: string) => setLanguage(newLanguage);
 
     socket.on("code-update", handleCodeUpdate);
     socket.on("load-document", handleLoadDocument);
-
     socket.on("language-update", handleLanguageUpdate);
     socket.on("user-count-update", handleUserCount);
 
@@ -105,178 +80,144 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
     };
   }, [socket]);
 
-  // 4. Handle changes when YOU type
-  // const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-  //    const newCode = e.target.value;
-  //    setContent(newCode);
-
-  //    // Emit to server
-  //    if (socket) {
-  //       socket.emit("code-change", { documentId, code: newCode });
-  //    }
-  // }
-
-  // 2. Handle Monaco Changes
-  // Monaco gives us the value directly, we don't need "e.target.value"
+  // --- EVENT HANDLERS ---
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       setContent(value);
-      if (socket) {
-        socket.emit("code-change", { documentId, code: value });
-      }
+      if (socket) socket.emit("code-change", { documentId, code: value });
     }
   };
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newLanguage = e.target.value;
     setLanguage(newLanguage);
-
-    // Telling the server we changed the language
-    if (socket) {
-      // Backend listens for "language-change"
-      socket.emit("language-change", { documentId, language: newLanguage });
-    }
-  }
+    if (socket) socket.emit("language-change", { documentId, language: newLanguage });
+  };
 
   const runCode = async () => {
     setIsRunning(true);
     setOutput(["Running..."]);
-
     try {
-      // Piston API Endpoint
       const response = await axios.post("https://emkc.org/api/v2/piston/execute", {
         language: language,
         version: LANGUAGES_VERSIONS[language],
-        files: [
-          {
-            content: content
-          }
-        ]
+        files: [{ content: content }],
       });
-
       const { run } = response.data;
-      // Combine stdout (success) and stderr (errors)
-      const result = (run.stdout || "") + (run.stderr || "");
-      setOutput(result.split("\n"));
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      setOutput([`Error: ${errorMessage}`]);
+      setOutput((run.stdout || "" + run.stderr || "").split("\n"));
+    } catch (error: any) {
+      setOutput([`Error: ${error.message}`]);
     } finally {
       setIsRunning(false);
     }
-
   };
 
-  //Dragging Logic
-  const startDragging = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  }
+  // --- DRAGGING LOGIC (EXPLAINED) ---
 
+  // 1. Start Dragging
+  const startDragging = (e: React.MouseEvent) => {
+    e.preventDefault(); 
+    e.stopPropagation();
+    setIsDragging(true);
+    isDraggingRef.current = true;
+    // Important: Force cursor to resize everywhere, even if mouse leaves the handle
+    document.body.style.cursor = "row-resize"; 
+  };
+
+  // 2. Stop Dragging
   const stopDragging = useCallback(() => {
     setIsDragging(false);
+    isDraggingRef.current = false;
+    document.body.style.cursor = "auto"; // Restore cursor
   }, []);
 
+  // 3. The Math for Dragging
   const onDrag = useCallback((e: MouseEvent) => {
-    if (!isDragging) return;
-    // Calculate new height based on mouse position from bottom of window
+    // If we aren't dragging, stop immediately
+    if (!isDraggingRef.current) return;
+    
+    e.preventDefault(); // Stop text selection while dragging
+    
+    // CALCULATION EXPLANATION:
+    // e.clientY = The mouse's vertical position from the TOP of the screen.
+    // window.innerHeight = The total height of the browser window.
+    //
+    // If window is 1000px and mouse is at 800px (near bottom):
+    // 1000 - 800 = 200px (Height of terminal)
+    //
+    // If mouse moves UP to 600px:
+    // 1000 - 600 = 400px (Terminal gets taller)
     const newHeight = window.innerHeight - e.clientY;
-    // Limit min/max height
-    if (newHeight > 100 && newHeight < window.innerHeight - 100) {
-      setTerminalHeight(newHeight);
-    }
+    
+    // SAFETY LIMITS:
+    const minHeight = 50; // Don't let it disappear
+    const maxHeight = window.innerHeight - 100; // Don't let it cover the toolbar
+    
+    // Clamp the value between min and max
+    const clampedHeight = Math.min(Math.max(newHeight, minHeight), maxHeight);
+    
+    setTerminalHeight(clampedHeight);
+  }, []);
 
-  }, [isDragging]);
-
+  // 4. Global Event Listeners
+  // We attach to 'window' so if you drag fast and mouse leaves the handle, it still works.
   useEffect(() => {
-    if (isDragging) {
-      window.addEventListener("mousemove", onDrag);
-      window.addEventListener("mouseup", stopDragging);
-    } else {
-      window.removeEventListener("mousemove", onDrag);
-      window.removeEventListener("mouseup", stopDragging);
-    }
+    window.addEventListener("mousemove", onDrag);
+    window.addEventListener("mouseup", stopDragging);
     return () => {
       window.removeEventListener("mousemove", onDrag);
       window.removeEventListener("mouseup", stopDragging);
     };
-  }, [isDragging, onDrag, stopDragging]);
+  }, [onDrag, stopDragging]);
 
-  // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
-return (
+  return (
     <div style={{ 
-       height: "100vh", 
-       display: "flex", 
-       flexDirection: "column", 
-       background: "#1e1e1e", 
-       overflow: "hidden",
-       position: "relative" // FIX 1: Anchors the overlay
+      height: "100vh", 
+      display: "flex", 
+      flexDirection: "column", 
+      background: "#1e1e1e", 
+      overflow: "hidden", 
+      position: "relative",
+      // UX FIX: Prevent highlighting text while dragging
+      userSelect: isDragging ? "none" : "auto" 
     }}>
       
-      {/* Toolbar */}
-      <div style={{ 
-          padding: "10px 20px", 
-          background: "#252526", 
-          borderBottom: "1px solid #333", 
-          display: "flex", 
-          justifyContent: "space-between", 
-          alignItems: "center",
-          flexShrink: 0 
-      }}>
+      {/* --- TOOLBAR (Fixed Height) --- */}
+      <div style={{ padding: "10px 20px", background: "#252526", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
           <span style={{ color: "#fff", fontWeight: "bold" }}>Nexus Editor</span>
-          <select
-            value={language}
-            onChange={handleLanguageChange}
-            style={{ padding: "5px", borderRadius: "4px", background: "#333", color: "#fff", border: "none" }}
-          >
-            {LANGUAGES.map((lang) => (
-              <option key={lang} value={lang}>
-                {lang.toUpperCase()}
-              </option>
-            ))}
+          <select value={language} onChange={handleLanguageChange} style={{ padding: "5px", borderRadius: "4px", background: "#333", color: "#fff", border: "none" }}>
+            {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang.toUpperCase()}</option>)}
           </select>
         </div>
-
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
-           <span style={{ color: "#4caf50", fontSize: "14px" }}>
-             🟢 {userCount} Online
-           </span>
-           <button
-             onClick={runCode}
-             disabled={isRunning}
-             style={{
-               padding: "8px 16px",
-               background: isRunning ? "#555" : "#007acc",
-               color: "white",
-               border: "none",
-               borderRadius: "4px",
-               cursor: isRunning ? "not-allowed" : "pointer",
-               fontWeight: "bold"
-             }}
-           >
-             {isRunning ? "Running..." : "▶ Run Code"}
-           </button>
+          <span style={{ color: "#4caf50", fontSize: "14px" }}>🟢 {userCount} Online</span>
+          <button onClick={runCode} disabled={isRunning} style={{ padding: "8px 16px", background: isRunning ? "#555" : "#007acc", color: "white", border: "none", borderRadius: "4px", cursor: isRunning ? "not-allowed" : "pointer", fontWeight: "bold" }}>
+            {isRunning ? "Running..." : "▶ Run Code"}
+          </button>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div 
-        style={{ 
-           flex: 1, 
-           display: "flex", 
-           flexDirection: "column", 
-           position: "relative",
-        }}
-      >
+      {/* --- MAIN LAYOUT --- */}
+      <div style={{ 
+        flex: 1, 
+        display: "flex", 
+        flexDirection: "column", 
+        position: "relative", 
+        overflow: "hidden" 
+      }}>
         
-        {/* Editor Area */}
-        {/* FIX 2: pointerEvents: "none" completely disables the editor while dragging */}
+        {/* EDITOR AREA (The part that shrinks) 
+           LOGIC: flex: 1 means "fill remaining space".
+           CRITICAL FIX: overflow: "hidden" is required. 
+           Without it, the editor refuses to shrink below its content size, 
+           which stops the terminal from being dragged up.
+        */}
         <div style={{ 
-            flex: 1, 
-            minHeight: 0,
-            pointerEvents: isDragging ? "none" : "auto" 
+          flex: 1, 
+          minHeight: 0, 
+          overflow: "hidden", 
+          pointerEvents: isDragging ? "none" : "auto" // Disable editor mouse events while dragging
         }}> 
            <Editor
              height="100%"
@@ -284,68 +225,64 @@ return (
              theme="vs-dark"
              value={content}
              onChange={handleEditorChange}
-             options={{ minimap: { enabled: false }, fontSize: 14 }}
+             options={{ minimap: { enabled: false }, fontSize: 14, automaticLayout: true }}
            />
         </div>
 
-        {/* Draggable Handle */}
+        {/* --- DRAG HANDLE --- */}
         <div 
            onMouseDown={startDragging}
            style={{
-              height: "10px", // Even thicker for easier grabbing
-              background: isDragging ? "#007acc" : "#2d2d2d",
+              height: "10px", 
+              marginTop: "-5px", // Overlap the border slightly
+              marginBottom: "-5px", 
+              zIndex: 10,
               cursor: "row-resize",
-              zIndex: 50,
-              transition: "background 0.2s",
-              borderTop: "1px solid #444",
-              borderBottom: "1px solid #444"
+              background: "transparent", 
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              position: "relative"
            }}
-        />
+        >
+           {/* Visual Line */}
+           <div style={{ width: "100%", height: "2px", background: isDragging ? "#007acc" : "#333" }}></div>
+        </div>
 
-        {/* Terminal Area */}
+        {/* TERMINAL AREA (The part that grows)
+           LOGIC: flexShrink: 0 is CRITICAL.
+           It tells Flexbox: "Respect my pixel height strictly. 
+           Do not automatically shrink me just because the Editor wants more space."
+        */}
         <div style={{ 
             height: `${terminalHeight}px`, 
             background: "#1e1e1e", 
-            padding: "10px",
-            color: "#ddd",
-            fontFamily: "monospace",
-            overflowY: "auto",
-            // pointerEvents: isDragging ? "none" : "auto" // Optional: smoother dragging over terminal too
+            borderTop: "1px solid #333",
+            display: "flex",
+            flexDirection: "column",
+            flexShrink: 0 // <--- THIS MAKES DRAGGING UP WORK
         }}>
-            <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display:"flex", justifyContent:"space-between" }}>
-                <span>TERMINAL OUTPUT</span>
-                <span 
-                    onClick={() => setOutput([])} 
-                    style={{cursor: "pointer", textDecoration:"underline"}}
-                >
-                    Clear
-                </span>
-            </div>
-            {output.length > 0 ? (
-                output.map((line, i) => (
+            <div style={{ padding: "10px", flex: 1, overflowY: "auto", fontFamily: "monospace", color: "#ddd" }}>
+                <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display:"flex", justifyContent:"space-between" }}>
+                    <span>TERMINAL OUTPUT</span>
+                    <span onClick={() => setOutput([])} style={{cursor: "pointer", textDecoration:"underline"}}>Clear</span>
+                </div>
+                {output.length > 0 ? output.map((line, i) => (
                     <div key={i} style={{ minHeight: "1.2em", whiteSpace: "pre-wrap" }}>{line}</div>
-                ))
-            ) : (
-                <div style={{ color: "#555", fontStyle: "italic" }}>Ready to execute...</div>
-            )}
+                )) : <div style={{ color: "#555", fontStyle: "italic" }}>Ready to execute...</div>}
+            </div>
         </div>
 
       </div>
 
-      {/* FIX 3: Moved Overlay to the END of the HTML. 
-          This ensures it sits on TOP of everything else in the stacking order. */}
+      {/* --- INVISIBLE SAFETY LAYER --- */}
+      {/* When dragging, this covers the whole screen to catch mouse movements 
+          even if you drag outside the browser window momentarily */}
       {isDragging && (
-        <div 
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 99999, // Super high z-index
-            cursor: "row-resize"
-          }} 
-        />
+        <div style={{
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            zIndex: 9999, cursor: "row-resize"
+        }} />
       )}
 
     </div>
