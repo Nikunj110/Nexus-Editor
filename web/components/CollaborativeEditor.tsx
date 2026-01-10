@@ -1,5 +1,5 @@
 "use client"
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 import Editor from "@monaco-editor/react";
 import axios from "axios";
@@ -52,6 +52,10 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   //State For Execution Output
   const [output, setOutput] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+
+  //resizable Terminal State
+  const [terminalHeight, setTerminalHeight] = useState(250) // Default height in pixels
+  const [isDragging, setIsDragging] = useState(false);
 
   // Helper to sync editor content without cursor jumping
   const editorRef = useRef<any>(null);
@@ -134,48 +138,58 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
     }
   }
 
-  const runCode = async()=>{
+  const runCode = async () => {
     setIsRunning(true);
     setOutput(["Running..."]);
 
     try {
       // Piston API Endpoint
-      const response = await axios.post("https://emkc.org/api/v2/piston/execute",{
-        language:language,
-        version:LANGUAGES_VERSIONS[language],
-        files:[
+      const response = await axios.post("https://emkc.org/api/v2/piston/execute", {
+        language: language,
+        version: LANGUAGES_VERSIONS[language],
+        files: [
           {
-            content:content
+            content: content
           }
         ]
       });
 
-      const {run} = response.data;
+      const { run } = response.data;
       // Combine stdout (success) and stderr (errors)
       const result = (run.stdout || "") + (run.stderr || "");
       setOutput(result.split("\n"));
-      
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       setOutput([`Error: ${errorMessage}`]);
-    }finally {
+    } finally {
       setIsRunning(false);
     }
 
   };
 
+  //Dragging Logic
+  const startDragging = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  const stopDragging = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
   // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#1e1e1e" }}>
-      
+
       {/* Toolbar */}
-      <div style={{ 
-          padding: "10px 20px", 
-          background: "#252526", 
-          borderBottom: "1px solid #333", 
-          display: "flex", 
-          justifyContent: "space-between", 
-          alignItems: "center" 
+      <div style={{
+        padding: "10px 20px",
+        background: "#252526",
+        borderBottom: "1px solid #333",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
       }}>
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
           <span style={{ color: "#fff", fontWeight: "bold" }}>Nexus Editor</span>
@@ -193,62 +207,62 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
         </div>
 
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
-           <span style={{ color: "#4caf50", fontSize: "14px" }}>
-             🟢 {userCount} Online
-           </span>
-           
-           {/* Run Button */}
-           <button
-             onClick={runCode}
-             disabled={isRunning}
-             style={{
-               padding: "8px 16px",
-               background: isRunning ? "#555" : "#007acc",
-               color: "white",
-               border: "none",
-               borderRadius: "4px",
-               cursor: isRunning ? "not-allowed" : "pointer",
-               fontWeight: "bold"
-             }}
-           >
-             {isRunning ? "Running..." : "▶ Run Code"}
-           </button>
+          <span style={{ color: "#4caf50", fontSize: "14px" }}>
+            🟢 {userCount} Online
+          </span>
+
+          {/* Run Button */}
+          <button
+            onClick={runCode}
+            disabled={isRunning}
+            style={{
+              padding: "8px 16px",
+              background: isRunning ? "#555" : "#007acc",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: isRunning ? "not-allowed" : "pointer",
+              fontWeight: "bold"
+            }}
+          >
+            {isRunning ? "Running..." : "▶ Run Code"}
+          </button>
         </div>
       </div>
 
       {/* Main Content Area: Split into Editor (Top) and Output (Bottom) */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        
+
         {/* Editor */}
         <div style={{ flex: 2, minHeight: "50%" }}>
-           <Editor
-             height="100%"
-             language={language}
-             theme="vs-dark"
-             value={content}
-             onChange={handleEditorChange}
-             options={{ minimap: { enabled: false }, fontSize: 14 }}
-           />
+          <Editor
+            height="100%"
+            language={language}
+            theme="vs-dark"
+            value={content}
+            onChange={handleEditorChange}
+            options={{ minimap: { enabled: false }, fontSize: 14 }}
+          />
         </div>
 
         {/* Output Terminal */}
-        <div style={{ 
-            flex: 1, 
-            background: "#1e1e1e", 
-            borderTop: "1px solid #333", 
-            padding: "10px",
-            color: "#ddd",
-            fontFamily: "monospace",
-            overflowY: "auto"
+        <div style={{
+          flex: 1,
+          background: "#1e1e1e",
+          borderTop: "1px solid #333",
+          padding: "10px",
+          color: "#ddd",
+          fontFamily: "monospace",
+          overflowY: "auto"
         }}>
-            <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px" }}>TERMINAL OUTPUT</div>
-            {output.length > 0 ? (
-                output.map((line, i) => (
-                    <div key={i} style={{ minHeight: "1.2em" }}>{line}</div>
-                ))
-            ) : (
-                <div style={{ color: "#555", fontStyle: "italic" }}>Click "Run Code" to see output here...</div>
-            )}
+          <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px" }}>TERMINAL OUTPUT</div>
+          {output.length > 0 ? (
+            output.map((line, i) => (
+              <div key={i} style={{ minHeight: "1.2em" }}>{line}</div>
+            ))
+          ) : (
+            <div style={{ color: "#555", fontStyle: "italic" }}>Click "Run Code" to see output here...</div>
+          )}
         </div>
 
       </div>
