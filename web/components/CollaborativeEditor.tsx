@@ -205,26 +205,15 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
 
   // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
 return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#1e1e1e", overflow: "hidden" }}>
+    <div style={{ 
+       height: "100vh", 
+       display: "flex", 
+       flexDirection: "column", 
+       background: "#1e1e1e", 
+       overflow: "hidden",
+       position: "relative" // FIX 1: Anchors the overlay
+    }}>
       
-      {/* --- FIX 1: Invisible Overlay --- 
-          This covers the WHOLE screen only when dragging. 
-          It catches all mouse events so the Editor doesn't steal them. 
-      */}
-      {isDragging && (
-        <div 
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 9999,
-            cursor: "row-resize"
-          }} 
-        />
-      )}
-
       {/* Toolbar */}
       <div style={{ 
           padding: "10px 20px", 
@@ -279,13 +268,16 @@ return (
            display: "flex", 
            flexDirection: "column", 
            position: "relative",
-           // --- FIX 2: Disable text selection while dragging ---
-           userSelect: isDragging ? "none" : "auto" 
         }}
       >
         
         {/* Editor Area */}
-        <div style={{ flex: 1, minHeight: 0 }}> 
+        {/* FIX 2: pointerEvents: "none" completely disables the editor while dragging */}
+        <div style={{ 
+            flex: 1, 
+            minHeight: 0,
+            pointerEvents: isDragging ? "none" : "auto" 
+        }}> 
            <Editor
              height="100%"
              language={language}
@@ -300,11 +292,13 @@ return (
         <div 
            onMouseDown={startDragging}
            style={{
-              height: "8px", // Made slightly thicker for easier grabbing
-              background: isDragging ? "#007acc" : "#333",
+              height: "10px", // Even thicker for easier grabbing
+              background: isDragging ? "#007acc" : "#2d2d2d",
               cursor: "row-resize",
-              zIndex: 50, // Higher than editor
-              transition: "background 0.2s"
+              zIndex: 50,
+              transition: "background 0.2s",
+              borderTop: "1px solid #444",
+              borderBottom: "1px solid #444"
            }}
         />
 
@@ -316,7 +310,7 @@ return (
             color: "#ddd",
             fontFamily: "monospace",
             overflowY: "auto",
-            borderTop: "1px solid #333"
+            // pointerEvents: isDragging ? "none" : "auto" // Optional: smoother dragging over terminal too
         }}>
             <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display:"flex", justifyContent:"space-between" }}>
                 <span>TERMINAL OUTPUT</span>
@@ -337,6 +331,23 @@ return (
         </div>
 
       </div>
+
+      {/* FIX 3: Moved Overlay to the END of the HTML. 
+          This ensures it sits on TOP of everything else in the stacking order. */}
+      {isDragging && (
+        <div 
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 99999, // Super high z-index
+            cursor: "row-resize"
+          }} 
+        />
+      )}
+
     </div>
   );
 };
