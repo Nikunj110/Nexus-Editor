@@ -1,7 +1,10 @@
 "use client"
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { io, Socket } from "socket.io-client";
-import Editor from "@monaco-editor/react"
+import Editor from "@monaco-editor/react";
+import axios from "axios";
+
+
 // import ReactQuill from "react-quill"; // If you use Quill
 
 const useSocket = (documentId: string) => {
@@ -29,22 +32,30 @@ interface CollaborativeEditorProps {
   documentId: string;
 }
 
-const LANGUAGES = [
-  "javascript",
-  "typescript",
-  "python",
-  "java",
-  "cpp",
-  "html",
-  "css",
-  "json"
-];
+const LANGUAGES_VERSIONS: Record<string, string> = {
+  javascript: "18.15.0",
+  typescript: "5.0.3",
+  python: "3.10.0",
+  java: "15.0.2",
+  csharp: "6.12.0",
+  php: "8.2.3",
+};
+
+const LANGUAGES = Object.keys(LANGUAGES_VERSIONS);
 
 const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   const socket = useSocket(documentId);
   const [content, setContent] = useState("// Start coding...");
   const [language, setLanguage] = useState("javascript");
-const [userCount, setUserCount] = useState(0);
+  const [userCount, setUserCount] = useState(0);
+
+  //State For Execution Output
+  const [output, setOutput] = useState<string[]>([]);
+  const [isRunning, setIsRunning] = useState(false);
+
+  // Helper to sync editor content without cursor jumping
+  const editorRef = useRef<any>(null);
+
 
 
   // 3. Listen for incoming code updates from others
@@ -61,9 +72,9 @@ const [userCount, setUserCount] = useState(0);
     };
 
     const handleUserCount = (count: number) => {
-        console.log("Users online:", count);
-        setUserCount(count);
-        //cnt How manyuser Online
+      console.log("Users online:", count);
+      setUserCount(count);
+      //cnt How manyuser Online
     };
 
     const handleLoadDocument = (storedCode: string) => {
@@ -78,9 +89,9 @@ const [userCount, setUserCount] = useState(0);
 
     socket.on("code-update", handleCodeUpdate);
     socket.on("load-document", handleLoadDocument);
- 
+
     socket.on("language-update", handleLanguageUpdate);
-    socket.on("user-count-update", handleUserCount);  
+    socket.on("user-count-update", handleUserCount);
 
     return () => {
       socket.off("code-update", handleCodeUpdate);
@@ -110,7 +121,7 @@ const [userCount, setUserCount] = useState(0);
         socket.emit("code-change", { documentId, code: value });
       }
     }
-  }
+  };
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newLanguage = e.target.value;
@@ -123,46 +134,126 @@ const [userCount, setUserCount] = useState(0);
     }
   }
 
+  const runCode = async()=>{
+    setIsRunning(true);
+    setOutput(["Running..."]);
+
+    try {
+      // Piston API Endpoint
+      const response = await axios.post("https://emkc.org/api/v2/piston/execute",{
+        language:language,
+        version:LANGUAGES_VERSIONS[language],
+        files:[
+          {
+            content:content
+          }
+        ]
+      });
+
+      const {run} = response.data;
+      // Combine stdout (success) and stderr (errors)
+      const result = (run.stdout || "") + (run.stderr || "");
+      setOutput(result.split("\n"));
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      setOutput([`Error: ${errorMessage}`]);
+    }finally {
+      setIsRunning(false);
+    }
+
+  };
+
   // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
   return (
-    <div style={{ height: "90vh", display: "flex", flexDirection: "column", border: "1px solid #333" }}>
-        
-        {/* Toolbar Section */}
-        <div style={{ padding: "10px", background: "#1e1e1e", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            
-            {/* Left side: Language Selector */}
-            <div>
-                <span style={{ color: "#fff", marginRight: "10px" }}>Language:</span>
-                <select 
-                    value={language} 
-                    onChange={handleLanguageChange}
-                    style={{ padding: "5px", borderRadius: "4px" }}
-                >
-                    {LANGUAGES.map((lang) => (
-                        <option key={lang} value={lang}>{lang.toUpperCase()}</option>
-                    ))}
-                </select>
-            </div>
-
-            {/* Right side: User Count */}
-            <div style={{ color: "#4caf50", fontWeight: "bold" }}>
-                🟢 {userCount} User{userCount !== 1 ? 's' : ''} Online
-            </div>
-
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#1e1e1e" }}>
+      
+      {/* Toolbar */}
+      <div style={{ 
+          padding: "10px 20px", 
+          background: "#252526", 
+          borderBottom: "1px solid #333", 
+          display: "flex", 
+          justifyContent: "space-between", 
+          alignItems: "center" 
+      }}>
+        <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+          <span style={{ color: "#fff", fontWeight: "bold" }}>Nexus Editor</span>
+          <select
+            value={language}
+            onChange={handleLanguageChange}
+            style={{ padding: "5px", borderRadius: "4px", background: "#333", color: "#fff", border: "none" }}
+          >
+            {LANGUAGES.map((lang) => (
+              <option key={lang} value={lang}>
+                {lang.toUpperCase()}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {/* Editor Section */}
-        <Editor
-            // ... (Keep existing Editor props) ...
+        <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+           <span style={{ color: "#4caf50", fontSize: "14px" }}>
+             🟢 {userCount} Online
+           </span>
+           
+           {/* Run Button */}
+           <button
+             onClick={runCode}
+             disabled={isRunning}
+             style={{
+               padding: "8px 16px",
+               background: isRunning ? "#555" : "#007acc",
+               color: "white",
+               border: "none",
+               borderRadius: "4px",
+               cursor: isRunning ? "not-allowed" : "pointer",
+               fontWeight: "bold"
+             }}
+           >
+             {isRunning ? "Running..." : "▶ Run Code"}
+           </button>
+        </div>
+      </div>
+
+      {/* Main Content Area: Split into Editor (Top) and Output (Bottom) */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        
+        {/* Editor */}
+        <div style={{ flex: 2, minHeight: "50%" }}>
+           <Editor
              height="100%"
              language={language}
              theme="vs-dark"
              value={content}
-             onChange={handleEditorChange} 
+             onChange={handleEditorChange}
              options={{ minimap: { enabled: false }, fontSize: 14 }}
-        />
+           />
+        </div>
+
+        {/* Output Terminal */}
+        <div style={{ 
+            flex: 1, 
+            background: "#1e1e1e", 
+            borderTop: "1px solid #333", 
+            padding: "10px",
+            color: "#ddd",
+            fontFamily: "monospace",
+            overflowY: "auto"
+        }}>
+            <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px" }}>TERMINAL OUTPUT</div>
+            {output.length > 0 ? (
+                output.map((line, i) => (
+                    <div key={i} style={{ minHeight: "1.2em" }}>{line}</div>
+                ))
+            ) : (
+                <div style={{ color: "#555", fontStyle: "italic" }}>Click "Run Code" to see output here...</div>
+            )}
+        </div>
+
+      </div>
     </div>
   );
-}
+};
 
 export default CollaborativeEditor;
