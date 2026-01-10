@@ -178,18 +178,44 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
     setIsDragging(false);
   }, []);
 
-  // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
-  return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#1e1e1e" }}>
+  const onDrag = useCallback((e: MouseEvent) => {
+    if (!isDragging) return;
+    // Calculate new height based on mouse position from bottom of window
+    const newHeight = window.innerHeight - e.clientY;
+    // Limit min/max height
+    if (newHeight > 100 && newHeight < window.innerHeight - 100) {
+      setTerminalHeight(newHeight);
+    }
 
+  }, [isDragging]);
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener("mousemove", onDrag);
+      window.addEventListener("mouseup", stopDragging);
+    } else {
+      window.removeEventListener("mousemove", onDrag);
+      window.removeEventListener("mouseup", stopDragging);
+    }
+    return () => {
+      window.removeEventListener("mousemove", onDrag);
+      window.removeEventListener("mouseup", stopDragging);
+    };
+  }, [isDragging, onDrag, stopDragging]);
+
+  // Replace <textarea> with your actual Editor (Monaco, CodeMirror, etc.)
+return (
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#1e1e1e", overflow: "hidden" }}>
+      
       {/* Toolbar */}
-      <div style={{
-        padding: "10px 20px",
-        background: "#252526",
-        borderBottom: "1px solid #333",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center"
+      <div style={{ 
+          padding: "10px 20px", 
+          background: "#252526", 
+          borderBottom: "1px solid #333", 
+          display: "flex", 
+          justifyContent: "space-between", 
+          alignItems: "center",
+          flexShrink: 0 
       }}>
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
           <span style={{ color: "#fff", fontWeight: "bold" }}>Nexus Editor</span>
@@ -207,62 +233,80 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
         </div>
 
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
-          <span style={{ color: "#4caf50", fontSize: "14px" }}>
-            🟢 {userCount} Online
-          </span>
-
-          {/* Run Button */}
-          <button
-            onClick={runCode}
-            disabled={isRunning}
-            style={{
-              padding: "8px 16px",
-              background: isRunning ? "#555" : "#007acc",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: isRunning ? "not-allowed" : "pointer",
-              fontWeight: "bold"
-            }}
-          >
-            {isRunning ? "Running..." : "▶ Run Code"}
-          </button>
+           <span style={{ color: "#4caf50", fontSize: "14px" }}>
+             🟢 {userCount} Online
+           </span>
+           <button
+             onClick={runCode}
+             disabled={isRunning}
+             style={{
+               padding: "8px 16px",
+               background: isRunning ? "#555" : "#007acc",
+               color: "white",
+               border: "none",
+               borderRadius: "4px",
+               cursor: isRunning ? "not-allowed" : "pointer",
+               fontWeight: "bold"
+             }}
+           >
+             {isRunning ? "Running..." : "▶ Run Code"}
+           </button>
         </div>
       </div>
 
-      {/* Main Content Area: Split into Editor (Top) and Output (Bottom) */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-
-        {/* Editor */}
-        <div style={{ flex: 2, minHeight: "50%" }}>
-          <Editor
-            height="100%"
-            language={language}
-            theme="vs-dark"
-            value={content}
-            onChange={handleEditorChange}
-            options={{ minimap: { enabled: false }, fontSize: 14 }}
-          />
+      {/* Main Content: Flex container filling remaining space */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative" }}>
+        
+        {/* Editor Area: Grows to fill available space above terminal */}
+        <div style={{ flex: 1, minHeight: 0 }}> 
+           <Editor
+             height="100%"
+             language={language}
+             theme="vs-dark"
+             value={content}
+             onChange={handleEditorChange}
+             options={{ minimap: { enabled: false }, fontSize: 14 }}
+           />
         </div>
 
-        {/* Output Terminal */}
-        <div style={{
-          flex: 1,
-          background: "#1e1e1e",
-          borderTop: "1px solid #333",
-          padding: "10px",
-          color: "#ddd",
-          fontFamily: "monospace",
-          overflowY: "auto"
+        {/* --- NEW: Draggable Handle --- */}
+        <div 
+           onMouseDown={startDragging}
+           style={{
+              height: "5px",
+              background: isDragging ? "#007acc" : "#333",
+              cursor: "row-resize",
+              zIndex: 10,
+              transition: "background 0.2s"
+           }}
+        />
+
+        {/* Terminal Area: Fixed height based on state */}
+        <div style={{ 
+            height: `${terminalHeight}px`, 
+            background: "#1e1e1e", 
+            padding: "10px",
+            color: "#ddd",
+            fontFamily: "monospace",
+            overflowY: "auto",
+            borderTop: "1px solid #333"
         }}>
-          <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px" }}>TERMINAL OUTPUT</div>
-          {output.length > 0 ? (
-            output.map((line, i) => (
-              <div key={i} style={{ minHeight: "1.2em" }}>{line}</div>
-            ))
-          ) : (
-            <div style={{ color: "#555", fontStyle: "italic" }}>Click "Run Code" to see output here...</div>
-          )}
+            <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display:"flex", justifyContent:"space-between" }}>
+                <span>TERMINAL OUTPUT</span>
+                <span 
+                    onClick={() => setOutput([])} 
+                    style={{cursor: "pointer", textDecoration:"underline"}}
+                >
+                    Clear
+                </span>
+            </div>
+            {output.length > 0 ? (
+                output.map((line, i) => (
+                    <div key={i} style={{ minHeight: "1.2em", whiteSpace: "pre-wrap" }}>{line}</div>
+                ))
+            ) : (
+                <div style={{ color: "#555", fontStyle: "italic" }}>Ready to execute...</div>
+            )}
         </div>
 
       </div>
