@@ -1,8 +1,9 @@
 "use client";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
-import Editor from "@monaco-editor/react";
+import Editor, { OnMount } from "@monaco-editor/react";
 import axios from "axios";
+import toast, { Toaster } from "react-hot-toast";
 
 // --- 1. SOCKET CONNECTION HOOK ---
 const useSocket = (documentId: string) => {
@@ -38,7 +39,6 @@ interface CollaborativeEditorProps {
   username: string;
 }
 
-
 const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => {
   const socket = useSocket(roomId);
   const [content, setContent] = useState("// Start coding...");
@@ -57,10 +57,20 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
   // can see the current value without needing a React re-render loop.
   const isDraggingRef = useRef(false);
 
+  // --- MONACO REFS FOR CURSORS ---
+  const editorRef = useRef<any>(null); // Holds the actual Monaco instance
+  const monacoRef = useRef<any>(null); // NEW: Holds the Monaco API to fix the TS Error!
+  const decorationsRef = useRef<string[]>([]); // Keeps track of drawn cursors so we can update/remove them
+
   // --- SOCKET LISTENERS ---
   useEffect(() => {
     if (!socket) return;
 
+    // -- TOAST NOTIFICATIONS --
+    const handleUserJoined = (name: string) => toast.success(`${name} joined the room`);
+    const handleUserLeft = (name: string) => toast.error(`${name} left the room`);
+
+    // -- EDITOR SYNC --
     const handleCodeUpdate = (newCode: string) => {
       // Only update if different to prevent cursor jumps
       setContent((prev) => (prev !== newCode ? newCode : prev));
@@ -69,20 +79,72 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
     const handleLoadDocument = (storedCode: string) => setContent(storedCode);
     const handleLanguageUpdate = (newLanguage: string) => setLanguage(newLanguage);
 
+    // -- REAL-TIME CURSORS --
+    const handleCursorUpdate = ({ socketId, username: remoteUser, position }: any) => {
+      // If monaco isn't fully loaded yet, safely ignore
+      if (!editorRef.current || !monacoRef.current) return;
+
+      // Use monacoRef instead of window.monaco to fix TypeScript error!
+      const newDecoration = {
+        range: new monacoRef.current.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+        options: {
+          className: "remote-cursor", // See CSS injected below
+          hoverMessage: { value: remoteUser },
+          beforeContentClassName: "remote-cursor-name",
+        }
+      };
+
+      decorationsRef.current = editorRef.current.deltaDecorations(decorationsRef.current, [newDecoration]);
+    };
+
+    const handleCursorRemove = () => {
+      if (editorRef.current) {
+        decorationsRef.current = editorRef.current.deltaDecorations(decorationsRef.current, []);
+      }
+    };
+
+    socket.on("user-joined", handleUserJoined);
+    socket.on("user-left", handleUserLeft);
     socket.on("code-update", handleCodeUpdate);
     socket.on("load-document", handleLoadDocument);
     socket.on("language-update", handleLanguageUpdate);
     socket.on("user-count-update", handleUserCount);
+    socket.on("cursor-update", handleCursorUpdate);
+    socket.on("cursor-remove", handleCursorRemove);
+
     // We emit a new event so the server knows WHO joined
     socket.emit("join-room", { roomId, username });
 
     return () => {
+      socket.off("user-joined", handleUserJoined);
+      socket.off("user-left", handleUserLeft);
       socket.off("code-update", handleCodeUpdate);
       socket.off("load-document", handleLoadDocument);
       socket.off("language-update", handleLanguageUpdate);
       socket.off("user-count-update", handleUserCount);
+      socket.off("cursor-update", handleCursorUpdate);
+      socket.off("cursor-remove", handleCursorRemove);
     };
   }, [socket, roomId, username]);
+
+  // --- EDITOR MOUNT HANDLER ---
+  const handleEditorDidMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco; // Save the API so we don't need window.monaco!
+
+    // Listen for YOUR cursor moving and send to server
+    editor.onDidChangeCursorPosition((e) => {
+      if (socket) {
+        socket.emit("cursor-change", {
+          roomId,
+          cursorData: {
+            username,
+            position: { lineNumber: e.position.lineNumber, column: e.position.column }
+          }
+        });
+      }
+    });
+  };
 
   // --- EVENT HANDLERS ---
   const handleEditorChange = (value: string | undefined) => {
@@ -198,6 +260,28 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
       userSelect: isDragging ? "none" : "auto"
     }}>
 
+      {/* --- NOTIFICATIONS & CURSOR STYLES --- */}
+      <Toaster position="bottom-right" toastOptions={{ style: { background: '#333', color: '#fff' } }} />
+
+      <style>{`
+        .remote-cursor {
+          border-left: 2px solid #FF9800;
+          position: absolute;
+        }
+        .remote-cursor-name::before {
+          content: "👤"; 
+          position: absolute;
+          top: -20px;
+          left: -2px;
+          background: #FF9800;
+          color: black;
+          font-size: 10px;
+          padding: 2px 4px;
+          border-radius: 4px;
+          white-space: nowrap;
+        }
+      `}</style>
+
       {/* --- TOOLBAR (Fixed Height) --- */}
       <div style={{ padding: "10px 20px", background: "#252526", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
@@ -224,10 +308,10 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
       }}>
 
         {/* EDITOR AREA (The part that shrinks) 
-           LOGIC: flex: 1 means "fill remaining space".
-           CRITICAL FIX: overflow: "hidden" is required. 
-           Without it, the editor refuses to shrink below its content size, 
-           which stops the terminal from being dragged up.
+            LOGIC: flex: 1 means "fill remaining space".
+            CRITICAL FIX: overflow: "hidden" is required. 
+            Without it, the editor refuses to shrink below its content size, 
+            which stops the terminal from being dragged up.
         */}
         <div style={{
           flex: 1,
@@ -241,6 +325,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
             theme="vs-dark"
             value={content}
             onChange={handleEditorChange}
+            onMount={handleEditorDidMount} // <-- Added the Mount Handler!
             options={{ minimap: { enabled: false }, fontSize: 14, automaticLayout: true }}
           />
         </div>
@@ -266,9 +351,9 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
         </div>
 
         {/* TERMINAL AREA (The part that grows)
-           LOGIC: flexShrink: 0 is CRITICAL.
-           It tells Flexbox: "Respect my pixel height strictly. 
-           Do not automatically shrink me just because the Editor wants more space."
+            LOGIC: flexShrink: 0 is CRITICAL.
+            It tells Flexbox: "Respect my pixel height strictly. 
+            Do not automatically shrink me just because the Editor wants more space."
         */}
         <div style={{
           height: `${terminalHeight}px`,

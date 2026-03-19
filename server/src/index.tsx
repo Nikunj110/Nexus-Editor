@@ -23,6 +23,7 @@ app.use(express.json());
 
 app.use(cors());
 
+const userSocketMap = new Map(); //For tracking Users
 io.on("connection", (socket) => {
     console.log("User Connected ", socket.id);
 
@@ -32,6 +33,8 @@ io.on("connection", (socket) => {
 
     socket.on("join-room", async ({ roomId, username }) => {
         socket.join(roomId);
+        //new Joinee Added there 
+        userSocketMap.set(socket.id, { roomId, username });
         console.log(`User ${username} joined room ${roomId}`);
 
         //Updates the User Counts on join
@@ -41,6 +44,7 @@ io.on("connection", (socket) => {
         const clients = io.sockets.adapter.rooms.get(roomId);
         io.to(roomId).emit("user-count-update", clients ? clients.size : 0);
 
+        // Tell others in the room who joined
         socket.to(roomId).emit("user-joined", username);
         //When New User Joins the Room Show The Data Of That rooms Which Are Already on redis
         try {
@@ -58,6 +62,15 @@ io.on("connection", (socket) => {
         } catch (error) {
             console.error("Redis Get Error : ", error);
         }
+    })
+
+    //Handle Cursor Movements
+    socket.on("cursor-change", ({ roomId, cursorData }) => {
+        // Relay the cursor position to everyone else in the room
+        socket.to(roomId).emit("cursor-update", {
+            socketId: socket.id,
+            ...cursorData
+        })
     })
 
     // When a user types, they send "code-change". We broadcast it to the room.
@@ -88,6 +101,23 @@ io.on("connection", (socket) => {
 
     socket.on("disconnecting", async () => {
         console.log("User disConnecting ", socket.id);
+
+        // Find who left
+        const userData = userSocketMap.get(socket.id);
+
+        if (userData) {
+            // Tell the room this specific person left
+            io.to(userData.roomId).emit("user-left", userData.username);
+            // Tell the room to remove their cursor
+            io.to(userData.roomId).emit("cursor-remove", socket.id);
+
+            // Update user count
+            const clients = io.sockets.adapter.rooms.get(userData.roomId);
+            io.to(userData.roomId).emit("user-count-update", clients ? clients.size : 0);
+
+            // Clean up memory
+            userSocketMap.delete(socket.id);
+        }
         // socket.rooms contains the rooms the user is in.
         // We loop through them to notify others they left.
         for (const room of socket.rooms) {
