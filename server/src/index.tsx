@@ -30,20 +30,22 @@ io.on("connection", (socket) => {
 
     //for Joining the Room
 
-    socket.on("join-room", async (documentId) => {
-        socket.join(documentId);
-        console.log(`User ${socket.id} joined room: ${documentId}`)
+    socket.on("join-room", async ({ roomId, username }) => {
+        socket.join(roomId);
+        console.log(`User ${username} joined room ${roomId}`);
 
         //Updates the User Counts on join
-        const sockets = await io.in(documentId).fetchSockets();
+        const sockets = await io.in(roomId).fetchSockets();
 
         // Broadcast the count to everyone in the room (including the new user)
-        io.to(documentId).emit("user-count-update", sockets.length);
+        const clients = io.sockets.adapter.rooms.get(roomId);
+        io.to(roomId).emit("user-count-update", clients ? clients.size : 0);
 
+        socket.to(roomId).emit("user-joined", username);
         //When New User Joins the Room Show The Data Of That rooms Which Are Already on redis
         try {
-            const storeCode = await redisClient.get(documentId);
-            const storedLanguage = await redisClient.get(`${documentId}-language`);
+            const storeCode = await redisClient.get(roomId);
+            const storedLanguage = await redisClient.get(`${roomId}-language`);
 
             if (storeCode) {
                 socket.emit("load-document", storeCode);

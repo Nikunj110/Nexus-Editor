@@ -34,11 +34,13 @@ const LANGUAGES_VERSIONS: Record<string, string> = {
 const LANGUAGES = Object.keys(LANGUAGES_VERSIONS);
 
 interface CollaborativeEditorProps {
-  documentId: string;
+  roomId: string;
+  username: string;
 }
 
-const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
-  const socket = useSocket(documentId);
+
+const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => {
+  const socket = useSocket(roomId);
   const [content, setContent] = useState("// Start coding...");
   const [language, setLanguage] = useState("javascript");
   const [userCount, setUserCount] = useState(0);
@@ -50,7 +52,7 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   // --- RESIZE STATE (The logic for the Terminal) ---
   const [terminalHeight, setTerminalHeight] = useState(250); // Start at 250px
   const [isDragging, setIsDragging] = useState(false);
-  
+
   // We use a Ref for dragging so the 'mousemove' event listener 
   // can see the current value without needing a React re-render loop.
   const isDraggingRef = useRef(false);
@@ -71,6 +73,8 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
     socket.on("load-document", handleLoadDocument);
     socket.on("language-update", handleLanguageUpdate);
     socket.on("user-count-update", handleUserCount);
+    // We emit a new event so the server knows WHO joined
+    socket.emit("join-room", { roomId, username });
 
     return () => {
       socket.off("code-update", handleCodeUpdate);
@@ -78,20 +82,20 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
       socket.off("language-update", handleLanguageUpdate);
       socket.off("user-count-update", handleUserCount);
     };
-  }, [socket]);
+  }, [socket, roomId, username]);
 
   // --- EVENT HANDLERS ---
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       setContent(value);
-      if (socket) socket.emit("code-change", { documentId, code: value });
+      if (socket) socket.emit("code-change", { roomId, code: value });
     }
   };
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newLanguage = e.target.value;
     setLanguage(newLanguage);
-    if (socket) socket.emit("language-change", { documentId, language: newLanguage });
+    if (socket) socket.emit("language-change", { roomId, language: newLanguage });
   };
 
   const runCode = async () => {
@@ -116,12 +120,12 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
 
   // 1. Start Dragging
   const startDragging = (e: React.MouseEvent) => {
-    e.preventDefault(); 
+    e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
     isDraggingRef.current = true;
     // Important: Force cursor to resize everywhere, even if mouse leaves the handle
-    document.body.style.cursor = "row-resize"; 
+    document.body.style.cursor = "row-resize";
   };
 
   // 2. Stop Dragging
@@ -135,9 +139,9 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   const onDrag = useCallback((e: MouseEvent) => {
     // If we aren't dragging, stop immediately
     if (!isDraggingRef.current) return;
-    
+
     e.preventDefault(); // Stop text selection while dragging
-    
+
     // CALCULATION EXPLANATION:
     // e.clientY = The mouse's vertical position from the TOP of the screen.
     // window.innerHeight = The total height of the browser window.
@@ -148,14 +152,14 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
     // If mouse moves UP to 600px:
     // 1000 - 600 = 400px (Terminal gets taller)
     const newHeight = window.innerHeight - e.clientY;
-    
+
     // SAFETY LIMITS:
     const minHeight = 50; // Don't let it disappear
     const maxHeight = window.innerHeight - 100; // Don't let it cover the toolbar
-    
+
     // Clamp the value between min and max
     const clampedHeight = Math.min(Math.max(newHeight, minHeight), maxHeight);
-    
+
     setTerminalHeight(clampedHeight);
   }, []);
 
@@ -171,17 +175,17 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
   }, [onDrag, stopDragging]);
 
   return (
-    <div style={{ 
-      height: "100vh", 
-      display: "flex", 
-      flexDirection: "column", 
-      background: "#1e1e1e", 
-      overflow: "hidden", 
+    <div style={{
+      height: "100vh",
+      display: "flex",
+      flexDirection: "column",
+      background: "#1e1e1e",
+      overflow: "hidden",
       position: "relative",
       // UX FIX: Prevent highlighting text while dragging
-      userSelect: isDragging ? "none" : "auto" 
+      userSelect: isDragging ? "none" : "auto"
     }}>
-      
+
       {/* --- TOOLBAR (Fixed Height) --- */}
       <div style={{ padding: "10px 20px", background: "#252526", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
@@ -199,54 +203,54 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
       </div>
 
       {/* --- MAIN LAYOUT --- */}
-      <div style={{ 
-        flex: 1, 
-        display: "flex", 
-        flexDirection: "column", 
-        position: "relative", 
-        overflow: "hidden" 
+      <div style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+        overflow: "hidden"
       }}>
-        
+
         {/* EDITOR AREA (The part that shrinks) 
            LOGIC: flex: 1 means "fill remaining space".
            CRITICAL FIX: overflow: "hidden" is required. 
            Without it, the editor refuses to shrink below its content size, 
            which stops the terminal from being dragged up.
         */}
-        <div style={{ 
-          flex: 1, 
-          minHeight: 0, 
-          overflow: "hidden", 
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "hidden",
           pointerEvents: isDragging ? "none" : "auto" // Disable editor mouse events while dragging
-        }}> 
-           <Editor
-             height="100%"
-             language={language}
-             theme="vs-dark"
-             value={content}
-             onChange={handleEditorChange}
-             options={{ minimap: { enabled: false }, fontSize: 14, automaticLayout: true }}
-           />
+        }}>
+          <Editor
+            height="100%"
+            language={language}
+            theme="vs-dark"
+            value={content}
+            onChange={handleEditorChange}
+            options={{ minimap: { enabled: false }, fontSize: 14, automaticLayout: true }}
+          />
         </div>
 
         {/* --- DRAG HANDLE --- */}
-        <div 
-           onMouseDown={startDragging}
-           style={{
-              height: "10px", 
-              marginTop: "-5px", // Overlap the border slightly
-              marginBottom: "-5px", 
-              zIndex: 10,
-              cursor: "row-resize",
-              background: "transparent", 
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              position: "relative"
-           }}
+        <div
+          onMouseDown={startDragging}
+          style={{
+            height: "10px",
+            marginTop: "-5px", // Overlap the border slightly
+            marginBottom: "-5px",
+            zIndex: 10,
+            cursor: "row-resize",
+            background: "transparent",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative"
+          }}
         >
-           {/* Visual Line */}
-           <div style={{ width: "100%", height: "2px", background: isDragging ? "#007acc" : "#333" }}></div>
+          {/* Visual Line */}
+          <div style={{ width: "100%", height: "2px", background: isDragging ? "#007acc" : "#333" }}></div>
         </div>
 
         {/* TERMINAL AREA (The part that grows)
@@ -254,23 +258,23 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
            It tells Flexbox: "Respect my pixel height strictly. 
            Do not automatically shrink me just because the Editor wants more space."
         */}
-        <div style={{ 
-            height: `${terminalHeight}px`, 
-            background: "#1e1e1e", 
-            borderTop: "1px solid #333",
-            display: "flex",
-            flexDirection: "column",
-            flexShrink: 0 // <--- THIS MAKES DRAGGING UP WORK
+        <div style={{
+          height: `${terminalHeight}px`,
+          background: "#1e1e1e",
+          borderTop: "1px solid #333",
+          display: "flex",
+          flexDirection: "column",
+          flexShrink: 0 // <--- THIS MAKES DRAGGING UP WORK
         }}>
-            <div style={{ padding: "10px", flex: 1, overflowY: "auto", fontFamily: "monospace", color: "#ddd" }}>
-                <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display:"flex", justifyContent:"space-between" }}>
-                    <span>TERMINAL OUTPUT</span>
-                    <span onClick={() => setOutput([])} style={{cursor: "pointer", textDecoration:"underline"}}>Clear</span>
-                </div>
-                {output.length > 0 ? output.map((line, i) => (
-                    <div key={i} style={{ minHeight: "1.2em", whiteSpace: "pre-wrap" }}>{line}</div>
-                )) : <div style={{ color: "#555", fontStyle: "italic" }}>Ready to execute...</div>}
+          <div style={{ padding: "10px", flex: 1, overflowY: "auto", fontFamily: "monospace", color: "#ddd" }}>
+            <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display: "flex", justifyContent: "space-between" }}>
+              <span>TERMINAL OUTPUT</span>
+              <span onClick={() => setOutput([])} style={{ cursor: "pointer", textDecoration: "underline" }}>Clear</span>
             </div>
+            {output.length > 0 ? output.map((line, i) => (
+              <div key={i} style={{ minHeight: "1.2em", whiteSpace: "pre-wrap" }}>{line}</div>
+            )) : <div style={{ color: "#555", fontStyle: "italic" }}>Ready to execute...</div>}
+          </div>
         </div>
 
       </div>
@@ -280,8 +284,8 @@ const CollaborativeEditor = ({ documentId }: CollaborativeEditorProps) => {
           even if you drag outside the browser window momentarily */}
       {isDragging && (
         <div style={{
-            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-            zIndex: 9999, cursor: "row-resize"
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 9999, cursor: "row-resize"
         }} />
       )}
 
