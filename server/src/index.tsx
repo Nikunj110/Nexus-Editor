@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import redisClient from "./config/redis.js";
+import { PrismaClient } from "@prisma/client"
 
 dotenv.config();
 
@@ -18,6 +19,28 @@ const io = new Server(httpServer, {
     }
 });
 
+const prisma = new PrismaClient();
+
+const defaultValue = "// Start coding...";
+
+// Helper function using Prisma's awesome "upsert" (Update or Insert)
+async function findOrCreateDocument(id: any) {
+    if (id == null) return
+
+    // Upsert looks for the document. If it doesn't exist, it creates it.
+    // If it does exist, it just returns it without updating anything.
+    const document = await prisma.document.upsert({
+        where: { id: id },
+        update: {},// Do nothing if it exists,
+        create: {
+            id: id,
+            content: defaultValue,
+            language: "javascript"
+        }
+    })
+
+    return document;
+}
 const PORT = process.env.PORT || 3001;
 app.use(express.json());
 
@@ -27,8 +50,6 @@ const userSocketMap = new Map(); //For tracking Users
 io.on("connection", (socket) => {
     console.log("User Connected ", socket.id);
 
-
-
     //for Joining the Room
 
     socket.on("join-room", async ({ roomId, username }) => {
@@ -36,6 +57,13 @@ io.on("connection", (socket) => {
         //new Joinee Added there 
         userSocketMap.set(socket.id, { roomId, username });
         console.log(`User ${username} joined room ${roomId}`);
+
+        // --- FETCH FROM POSTGRES ---
+        const document = await findOrCreateDocument(roomId);
+
+        // Send the saved code to the client
+        socket.emit("load-document", document.content);
+        socket.emit("language-update", document.language);
 
         //Updates the User Counts on join
         const sockets = await io.in(roomId).fetchSockets();
