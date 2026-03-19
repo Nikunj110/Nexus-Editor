@@ -108,9 +108,21 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
         files: [{ content: content }],
       });
       const { run } = response.data;
-      setOutput((run.stdout || "" + run.stderr || "").split("\n"));
+      const result = run.stdout || run.stderr || "";
+      setOutput(result.split("\n"));
     } catch (error: any) {
-      setOutput([`Error: ${error.message}`]);
+      if (error.response) {
+        if (error.response.status === 401 || error.response.status === 429) {
+          setOutput([
+            "⚠️ Error: You are being rate-limited by the free public API.",
+            "Please wait a few minutes before running code again."
+          ]);
+        } else {
+          setOutput([`⚠️ API Error: Server returned status ${error.response.status}`]);
+        }
+      } else {
+        setOutput([`⚠️ Network Error: ${error.message}`]);
+      }
     } finally {
       setIsRunning(false);
     }
