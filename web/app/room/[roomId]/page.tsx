@@ -16,7 +16,7 @@ const RoomPage = () => {
     return (<div>
         <div style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
             {/* Pass the dynamic ID to your component */}
-            <CollaborativeEditor documentId={roomId as string} />
+            <CollaborativeEditor roomId={roomId as string} username="Guest Developer" />
         </div>
     </div>)
 }
