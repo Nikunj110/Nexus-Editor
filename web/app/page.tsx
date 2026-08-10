@@ -1,32 +1,29 @@
 "use client";
 import React, { useState } from "react";
-import CollaborativeEditor from "../components/CollaborativeEditor";
-import { v4 as uuidV4 } from "uuid";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
-  const [joined, setJoined] = useState(false);
+  const router = useRouter();
   const [roomId, setRoomId] = useState("");
   const [username, setUsername] = useState("");
 
   const joinRoom = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roomId || !username) {
+    if (!roomId.trim() || !username.trim()) {
       alert("Please enter both Room ID and Username");
       return;
     }
-    setJoined(true);
+    // Store username in sessionStorage so the room page can read it
+    sessionStorage.setItem("nexus-username", username.trim());
+    router.push(`/room/${roomId.trim()}`);
   };
 
   const createNewRoom = (e: React.MouseEvent) => {
     e.preventDefault();
-    // Generate a random room ID (simple random string or UUID)
+    // Generate a random room ID (simple random string)
     const newId = Math.random().toString(36).substring(2, 9);
     setRoomId(newId);
   };
-
-  if (joined) {
-    return <CollaborativeEditor roomId={roomId} username={username} />;
-  }
 
   return (
     <div style={{

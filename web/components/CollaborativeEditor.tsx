@@ -23,15 +23,8 @@ const useSocket = (documentId: string) => {
 };
 
 // --- CONSTANTS ---
-const LANGUAGES_VERSIONS: Record<string, string> = {
-  javascript: "18.15.0",
-  typescript: "5.0.3",
-  python: "3.10.0",
-  java: "15.0.2",
-  csharp: "6.12.0",
-  php: "8.2.3",
-};
-const LANGUAGES = Object.keys(LANGUAGES_VERSIONS);
+const LANGUAGES = ["javascript", "c", "python", "cpp"];
+const SERVER_URL = "http://localhost:3001";
 
 interface CollaborativeEditorProps {
   roomId: string;
@@ -43,6 +36,8 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
   const [content, setContent] = useState("// Start coding...");
   const [language, setLanguage] = useState("javascript");
   const [userCount, setUserCount] = useState(0);
+  const [users, setUsers] = useState<string[]>([]);
+  const [showUsersPopup, setShowUsersPopup] = useState(false);
 
   // Execution State
   const [output, setOutput] = useState<string[]>([]);
@@ -75,6 +70,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
       setContent((prev) => (prev !== newCode ? newCode : prev));
     };
     const handleUserCount = (count: number) => setUserCount(count);
+    const handleUserList = (userList: string[]) => setUsers(userList);
     const handleLoadDocument = (storedCode: string) => setContent(storedCode);
     const handleLanguageUpdate = (newLanguage: string) => setLanguage(newLanguage);
 
@@ -108,6 +104,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
     socket.on("load-document", handleLoadDocument);
     socket.on("language-update", handleLanguageUpdate);
     socket.on("user-count-update", handleUserCount);
+    socket.on("user-list-update", handleUserList);
     socket.on("cursor-update", handleCursorUpdate);
     socket.on("cursor-remove", handleCursorRemove);
 
@@ -121,6 +118,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
       socket.off("load-document", handleLoadDocument);
       socket.off("language-update", handleLanguageUpdate);
       socket.off("user-count-update", handleUserCount);
+      socket.off("user-list-update", handleUserList);
       socket.off("cursor-update", handleCursorUpdate);
       socket.off("cursor-remove", handleCursorRemove);
     };
@@ -159,30 +157,39 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
     if (socket) socket.emit("language-change", { roomId, language: newLanguage });
   };
 
+  // --- CODE EXECUTION (Self-hosted Docker) ---
   const runCode = async () => {
     setIsRunning(true);
-    setOutput(["Running..."]);
+    setOutput(["⏳ Running..."]);
     try {
-      const response = await axios.post("https://emkc.org/api/v2/piston/execute", {
+      const response = await axios.post(`${SERVER_URL}/api/execute`, {
         language: language,
-        version: LANGUAGES_VERSIONS[language],
-        files: [{ content: content }],
+        code: content,
       });
-      const { run } = response.data;
-      const result = run.stdout || run.stderr || "";
-      setOutput(result.split("\n"));
+
+      const { stdout, stderr, exitCode, timedOut } = response.data;
+      const lines: string[] = [];
+
+      if (stdout) {
+        lines.push(...stdout.split("\n"));
+      }
+      if (stderr) {
+        lines.push(...stderr.split("\n").map((l: string) => `⚠️ ${l}`));
+      }
+      if (timedOut) {
+        lines.push("", "⏱️ Execution timed out.");
+      }
+
+      lines.push("", `Process exited with code ${exitCode}`);
+
+      setOutput(lines.filter((l) => l !== undefined));
     } catch (error: any) {
-      if (error.response) {
-        if (error.response.status === 401 || error.response.status === 429) {
-          setOutput([
-            "⚠️ Error: You are being rate-limited by the free public API.",
-            "Please wait a few minutes before running code again."
-          ]);
-        } else {
-          setOutput([`⚠️ API Error: Server returned status ${error.response.status}`]);
-        }
+      if (error.response?.data?.error) {
+        setOutput([`⚠️ ${error.response.data.error}`]);
+      } else if (error.response?.data?.stderr) {
+        setOutput([`⚠️ ${error.response.data.stderr}`]);
       } else {
-        setOutput([`⚠️ Network Error: ${error.message}`]);
+        setOutput([`⚠️ Error: ${error.message}`]);
       }
     } finally {
       setIsRunning(false);
@@ -290,7 +297,52 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
           </select>
         </div>
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
-          <span style={{ color: "#4caf50", fontSize: "14px" }}>🟢 {userCount} Online</span>
+          <div style={{ position: "relative" }}>
+            <span 
+              onClick={() => setShowUsersPopup(!showUsersPopup)} 
+              style={{ color: "#4caf50", fontSize: "14px", cursor: "pointer", userSelect: "none" }}
+            >
+              🟢 {userCount} Online
+            </span>
+            {showUsersPopup && (
+              <>
+                {/* Invisible backdrop to close the popup when clicking outside */}
+                <div 
+                  onClick={() => setShowUsersPopup(false)}
+                  style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 90 }} 
+                />
+                {/* Popup container */}
+                <div style={{
+                  position: "absolute",
+                  top: "120%",
+                  right: 0,
+                  background: "#252526",
+                  border: "1px solid #444",
+                  borderRadius: "6px",
+                  padding: "12px",
+                  boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+                  zIndex: 100,
+                  width: "200px",
+                  maxHeight: "250px",
+                  overflowY: "auto",
+                }}>
+                  <h4 style={{ margin: "0 0 10px 0", color: "#ccc", fontSize: "12px", borderBottom: "1px solid #444", paddingBottom: "6px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Online Users ({users.length})
+                  </h4>
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                    {users.length > 0 ? users.map((u, i) => (
+                      <li key={i} style={{ color: "#fff", fontSize: "13px", padding: "6px 0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#4caf50" }}></span>
+                        {u}
+                      </li>
+                    )) : (
+                      <li style={{ color: "#888", fontSize: "13px", fontStyle: "italic" }}>Just you...</li>
+                    )}
+                  </ul>
+                </div>
+              </>
+            )}
+          </div>
           <button onClick={runCode} disabled={isRunning} style={{ padding: "8px 16px", background: isRunning ? "#555" : "#007acc", color: "white", border: "none", borderRadius: "4px", cursor: isRunning ? "not-allowed" : "pointer", fontWeight: "bold" }}>
             {isRunning ? "Running..." : "▶ Run Code"}
           </button>
@@ -363,9 +415,9 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
           flexShrink: 0 // <--- THIS MAKES DRAGGING UP WORK
         }}>
           <div style={{ padding: "10px", flex: 1, overflowY: "auto", fontFamily: "monospace", color: "#ddd" }}>
-            <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display: "flex", justifyContent: "space-between" }}>
+            <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display: "flex", justifyContent: "space-between", paddingRight: "15px" }}>
               <span>TERMINAL OUTPUT</span>
-              <span onClick={() => setOutput([])} style={{ cursor: "pointer", textDecoration: "underline" }}>Clear</span>
+              <span onClick={() => setOutput([])} style={{ cursor: "pointer", textDecoration: "underline", color: "#ccc" }}>Clear</span>
             </div>
             {output.length > 0 ? output.map((line, i) => (
               <div key={i} style={{ minHeight: "1.2em", whiteSpace: "pre-wrap" }}>{line}</div>
