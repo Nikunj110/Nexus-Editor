@@ -8,8 +8,10 @@ datasource db {
 }
 
 model Document {
-  id        String   @id
-  content   String
-  language  String   @default("javascript")
-  updatedAt DateTime @updatedAt
+  id           String   @id
+  content      String
+  language     String   @default("javascript")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastActiveAt DateTime @default(now())
 }

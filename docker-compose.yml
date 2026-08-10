@@ -12,13 +12,12 @@ services:
       POSTGRES_DB: sync_db
     ports:
       - "5432:5432"
-      #hiii
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
   # 2. The Real-Time Engine
   redis:
-    image: redis:-alpine
+    image: redis:alpine
     container_name: sync_redis
     restart: always
     ports:
