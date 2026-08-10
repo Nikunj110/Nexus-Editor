@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # 1. The Database 
   postgres:
-    image: postgres:15
+    image: postgres:17
     container_name: sync_postgres
     restart: always
     environment:
@@ -18,7 +18,7 @@ services:
 
   # 2. The Real-Time Engine
   redis:
-    image: redis:alpine
+    image: redis:-alpine
     container_name: sync_redis
     restart: always
     ports:

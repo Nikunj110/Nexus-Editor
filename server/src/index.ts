@@ -1,12 +1,10 @@
+import "dotenv/config.js";
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import redisClient from "./config/redis.js";
 import { PrismaClient } from "@prisma/client"
-
-dotenv.config();
 
 const app = express();
 
@@ -52,7 +50,13 @@ io.on("connection", (socket) => {
 
     //for Joining the Room
 
-    socket.on("join-room", async ({ roomId, username }) => {
+    socket.on("join-room", async (payload: any) => {
+        if (!payload || !payload.roomId || !payload.username) {
+            console.error("Invalid join-room payload:", payload);
+            return;
+        }
+        const { roomId, username } = payload;
+        
         socket.join(roomId);
         //new Joinee Added there 
         userSocketMap.set(socket.id, { roomId, username });
@@ -60,6 +64,10 @@ io.on("connection", (socket) => {
 
         // --- FETCH FROM POSTGRES ---
         const document = await findOrCreateDocument(roomId);
+        if (!document) {
+            console.error("Could not find or create document for room:", roomId);
+            return;
+        }
 
         // Send the saved code to the client
         socket.emit("load-document", document.content);
