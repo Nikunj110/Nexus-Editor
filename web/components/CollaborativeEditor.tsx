@@ -41,6 +41,8 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
   // Execution State
   const [output, setOutput] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [stdin, setStdin] = useState("");
+  const [activeTab, setActiveTab] = useState<"output" | "input">("output");
 
   // --- RESIZE STATE (The logic for the Terminal) ---
   const [terminalHeight, setTerminalHeight] = useState(250); // Start at 250px
@@ -159,11 +161,13 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
   // --- CODE EXECUTION (Self-hosted Docker) ---
   const runCode = async () => {
     setIsRunning(true);
+    setActiveTab("output");
     setOutput(["⏳ Running..."]);
     try {
       const response = await axios.post(`/api/execute`, {
         language: language,
         code: content,
+        stdin: stdin,
       });
 
       const { stdout, stderr, exitCode, timedOut } = response.data;
@@ -372,6 +376,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
           <Editor
             height="100%"
             language={language}
+            path={`main.${language}`}
             theme="vs-dark"
             value={content}
             onChange={handleEditorChange}
@@ -413,14 +418,45 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
           flexDirection: "column",
           flexShrink: 0 // <--- THIS MAKES DRAGGING UP WORK
         }}>
-          <div style={{ padding: "10px", flex: 1, overflowY: "auto", fontFamily: "monospace", color: "#ddd" }}>
-            <div style={{ color: "#888", marginBottom: "5px", fontSize: "12px", display: "flex", justifyContent: "space-between", paddingRight: "15px" }}>
-              <span>TERMINAL OUTPUT</span>
-              <span onClick={() => setOutput([])} style={{ cursor: "pointer", textDecoration: "underline", color: "#ccc" }}>Clear</span>
-            </div>
-            {output.length > 0 ? output.map((line, i) => (
-              <div key={i} style={{ minHeight: "1.2em", whiteSpace: "pre-wrap" }}>{line}</div>
-            )) : <div style={{ color: "#555", fontStyle: "italic" }}>Ready to execute...</div>}
+          {/* TABS HEADER */}
+          <div style={{ display: "flex", borderBottom: "1px solid #333", background: "#252526" }}>
+            <button 
+              onClick={() => setActiveTab("output")}
+              style={{ padding: "8px 16px", background: activeTab === "output" ? "#1e1e1e" : "transparent", color: activeTab === "output" ? "#fff" : "#888", border: "none", borderTop: activeTab === "output" ? "2px solid #007acc" : "2px solid transparent", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}
+            >
+              TERMINAL OUTPUT
+            </button>
+            <button 
+              onClick={() => setActiveTab("input")}
+              style={{ padding: "8px 16px", background: activeTab === "input" ? "#1e1e1e" : "transparent", color: activeTab === "input" ? "#fff" : "#888", border: "none", borderTop: activeTab === "input" ? "2px solid #007acc" : "2px solid transparent", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}
+            >
+              INPUT (STDIN)
+            </button>
+            <div style={{ flex: 1 }} />
+            {activeTab === "output" && (
+              <button onClick={() => setOutput([])} style={{ background: "transparent", color: "#ccc", border: "none", padding: "8px 16px", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>
+                Clear
+              </button>
+            )}
+          </div>
+          
+          {/* TAB CONTENT */}
+          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+            {activeTab === "output" ? (
+              <div style={{ padding: "10px", fontFamily: "monospace", color: "#ddd" }}>
+                {output.length > 0 ? output.map((line, i) => (
+                  <div key={i} style={{ minHeight: "1.2em", whiteSpace: "pre-wrap" }}>{line}</div>
+                )) : <div style={{ color: "#555", fontStyle: "italic" }}>Ready to execute...</div>}
+              </div>
+            ) : (
+              <textarea
+                value={stdin}
+                onChange={(e) => setStdin(e.target.value)}
+                placeholder="Enter standard input here..."
+                style={{ flex: 1, padding: "10px", background: "#1e1e1e", color: "#ddd", border: "none", resize: "none", outline: "none", fontFamily: "monospace", fontSize: "14px" }}
+                spellCheck={false}
+              />
+            )}
           </div>
         </div>
 

@@ -13,7 +13,7 @@ const EXECUTION_TIMEOUT = parseInt(process.env.DOCKER_EXECUTION_TIMEOUT || "1000
 const MEMORY_LIMIT = process.env.DOCKER_MEMORY_LIMIT || "128m";
 
 router.post("/", async (req: Request, res: Response) => {
-    const { language, code } = req.body;
+    const { language, code, stdin } = req.body;
 
     // --- Validation ---
     if (!language || typeof language !== "string") {
@@ -46,6 +46,7 @@ router.post("/", async (req: Request, res: Response) => {
         // Build docker run command arguments
         const dockerArgs = [
             "run",
+            "-i",                            // Keep STDIN open even if not attached
             "--rm",                          // Auto-remove container after exit
             "--network", "none",             // No network access
             "--memory", MEMORY_LIMIT,        // Memory limit
@@ -60,7 +61,7 @@ router.post("/", async (req: Request, res: Response) => {
             "sh", "-c", langConfig.command(containerFilePath),
         ];
 
-        const result = await runDocker(dockerArgs, EXECUTION_TIMEOUT);
+        const result = await runDocker(dockerArgs, EXECUTION_TIMEOUT, stdin);
 
         res.json({
             stdout: result.stdout,
@@ -95,7 +96,7 @@ interface ExecutionResult {
     timedOut: boolean;
 }
 
-function runDocker(args: string[], timeoutMs: number): Promise<ExecutionResult> {
+function runDocker(args: string[], timeoutMs: number, stdin?: string): Promise<ExecutionResult> {
     return new Promise((resolve) => {
         const child = execFile("docker", args, {
             timeout: timeoutMs,
@@ -120,6 +121,12 @@ function runDocker(args: string[], timeoutMs: number): Promise<ExecutionResult> 
                 timedOut: false,
             });
         });
+
+        // If standard input was provided, write it to the child process
+        if (stdin) {
+            child.stdin?.write(stdin);
+            child.stdin?.end();
+        }
     });
 }
 
