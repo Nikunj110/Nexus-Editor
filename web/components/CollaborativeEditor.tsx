@@ -42,7 +42,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
   const [output, setOutput] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [stdin, setStdin] = useState("");
-  const [activeTab, setActiveTab] = useState<"output" | "input">("output");
+  const [activeTab, setActiveTab] = useState<"output" | "input">("input");
 
   // --- RESIZE STATE (The logic for the Terminal) ---
   const [terminalHeight, setTerminalHeight] = useState(250); // Start at 250px
@@ -286,7 +286,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
       `}</style>
 
       {/* --- TOOLBAR (Fixed Height) --- */}
-      <div style={{ padding: "10px 20px", background: "#252526", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+      <div style={{ padding: "10px", background: "#252526", borderBottom: "1px solid #333", display: "flex", flexWrap: "wrap", gap: "10px", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
           <span style={{ color: "#fff", fontWeight: "bold" }}>Nexus Editor</span>
           <select value={language} onChange={handleLanguageChange} style={{ padding: "5px", borderRadius: "4px", background: "#333", color: "#fff", border: "none" }}>
@@ -367,6 +367,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
         <div style={{
           flex: 1,
           minHeight: 0,
+          minWidth: 0, // CRITICAL FIX for horizontal shrinking in Side Panel layout
           overflow: "hidden",
           pointerEvents: isDragging ? "none" : "auto" // Disable editor mouse events while dragging
         }}>
@@ -435,7 +436,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
           flexShrink: 0 // <--- THIS MAKES DRAGGING UP WORK
         }}>
           {/* TABS HEADER */}
-          <div style={{ display: "flex", borderBottom: "1px solid #333", background: "#252526" }}>
+          <div style={{ display: "flex", borderBottom: "1px solid #333", background: "#252526", overflowX: "auto" }}>
             <button 
               onClick={() => setActiveTab("output")}
               style={{ padding: "8px 16px", background: activeTab === "output" ? "#1e1e1e" : "transparent", color: activeTab === "output" ? "#fff" : "#888", border: "none", borderTop: activeTab === "output" ? "2px solid #007acc" : "2px solid transparent", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}
