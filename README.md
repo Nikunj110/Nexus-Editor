@@ -1,5 +1,7 @@
 # Nexus Editor
 
+🔥 **Live Demo:** [https://editor.nikunjgajera.me](https://editor.nikunjgajera.me)
+
 A real-time collaborative code editor with persistent rooms, live code synchronization, and self-hosted Docker-based code execution.
 
 ## Architecture

@@ -46,6 +46,8 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
 
   // --- RESIZE STATE (The logic for the Terminal) ---
   const [terminalHeight, setTerminalHeight] = useState(250); // Start at 250px
+  const [panelLayout, setPanelLayout] = useState<"bottom" | "side">("bottom");
+  const [panelWidth, setPanelWidth] = useState(400); // For side layout
   const [isDragging, setIsDragging] = useState(false);
 
   // We use a Ref for dragging so the 'mousemove' event listener 
@@ -208,7 +210,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
     setIsDragging(true);
     isDraggingRef.current = true;
     // Important: Force cursor to resize everywhere, even if mouse leaves the handle
-    document.body.style.cursor = "row-resize";
+    document.body.style.cursor = panelLayout === "bottom" ? "row-resize" : "col-resize";
   };
 
   // 2. Stop Dragging
@@ -225,26 +227,18 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
 
     e.preventDefault(); // Stop text selection while dragging
 
-    // CALCULATION EXPLANATION:
-    // e.clientY = The mouse's vertical position from the TOP of the screen.
-    // window.innerHeight = The total height of the browser window.
-    //
-    // If window is 1000px and mouse is at 800px (near bottom):
-    // 1000 - 800 = 200px (Height of terminal)
-    //
-    // If mouse moves UP to 600px:
-    // 1000 - 600 = 400px (Terminal gets taller)
-    const newHeight = window.innerHeight - e.clientY;
-
-    // SAFETY LIMITS:
-    const minHeight = 50; // Don't let it disappear
-    const maxHeight = window.innerHeight - 100; // Don't let it cover the toolbar
-
-    // Clamp the value between min and max
-    const clampedHeight = Math.min(Math.max(newHeight, minHeight), maxHeight);
-
-    setTerminalHeight(clampedHeight);
-  }, []);
+    if (panelLayout === "bottom") {
+      const newHeight = window.innerHeight - e.clientY;
+      const minHeight = 50; 
+      const maxHeight = window.innerHeight - 100;
+      setTerminalHeight(Math.min(Math.max(newHeight, minHeight), maxHeight));
+    } else {
+      const newWidth = window.innerWidth - e.clientX;
+      const minWidth = 200;
+      const maxWidth = window.innerWidth - 100;
+      setPanelWidth(Math.min(Math.max(newWidth, minWidth), maxWidth));
+    }
+  }, [panelLayout]);
 
   // 4. Global Event Listeners
   // We attach to 'window' so if you drag fast and mouse leaves the handle, it still works.
@@ -346,6 +340,9 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
               </>
             )}
           </div>
+          <button onClick={() => setPanelLayout(prev => prev === "bottom" ? "side" : "bottom")} style={{ padding: "8px 12px", background: "#333", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>
+            {panelLayout === "bottom" ? "◫ Side Panel" : "⬒ Bottom Panel"}
+          </button>
           <button onClick={runCode} disabled={isRunning} style={{ padding: "8px 16px", background: isRunning ? "#555" : "#007acc", color: "white", border: "none", borderRadius: "4px", cursor: isRunning ? "not-allowed" : "pointer", fontWeight: "bold" }}>
             {isRunning ? "Running..." : "▶ Run Code"}
           </button>
@@ -356,7 +353,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
       <div style={{
         flex: 1,
         display: "flex",
-        flexDirection: "column",
+        flexDirection: panelLayout === "bottom" ? "column" : "row",
         position: "relative",
         overflow: "hidden"
       }}>
@@ -389,11 +386,20 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
         <div
           onMouseDown={startDragging}
           style={{
-            height: "10px",
-            marginTop: "-5px", // Overlap the border slightly
-            marginBottom: "-5px",
+            ...(panelLayout === "bottom" ? {
+              height: "10px",
+              marginTop: "-5px",
+              marginBottom: "-5px",
+              width: "100%",
+              cursor: "row-resize",
+            } : {
+              width: "10px",
+              marginLeft: "-5px",
+              marginRight: "-5px",
+              height: "100%",
+              cursor: "col-resize",
+            }),
             zIndex: 10,
-            cursor: "row-resize",
             background: "transparent",
             display: "flex",
             alignItems: "center",
@@ -402,7 +408,10 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
           }}
         >
           {/* Visual Line */}
-          <div style={{ width: "100%", height: "2px", background: isDragging ? "#007acc" : "#333" }}></div>
+          <div style={{ 
+            background: isDragging ? "#007acc" : "#333",
+            ...(panelLayout === "bottom" ? { width: "100%", height: "2px" } : { height: "100%", width: "2px" })
+          }}></div>
         </div>
 
         {/* TERMINAL AREA (The part that grows)
@@ -411,9 +420,16 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
             Do not automatically shrink me just because the Editor wants more space."
         */}
         <div style={{
-          height: `${terminalHeight}px`,
+          ...(panelLayout === "bottom" ? {
+            height: `${terminalHeight}px`,
+            width: "100%",
+            borderTop: "1px solid #333",
+          } : {
+            width: `${panelWidth}px`,
+            height: "100%",
+            borderLeft: "1px solid #333",
+          }),
           background: "#1e1e1e",
-          borderTop: "1px solid #333",
           display: "flex",
           flexDirection: "column",
           flexShrink: 0 // <--- THIS MAKES DRAGGING UP WORK
@@ -468,7 +484,7 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
       {isDragging && (
         <div style={{
           position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-          zIndex: 9999, cursor: "row-resize"
+          zIndex: 9999, cursor: panelLayout === "bottom" ? "row-resize" : "col-resize"
         }} />
       )}
 

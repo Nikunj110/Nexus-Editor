@@ -1,0 +1,38 @@
+name: Deploy to Azure VM
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Navigate to project folder
+            cd ~/Nexus-Editor
+            
+            # Pull latest code
+            git pull origin main
+            
+            # 1. Update and Rebuild Frontend
+            cd web
+            rm -rf .next
+            npm install
+            npm run build
+            
+            # 2. Update and Rebuild Backend
+            cd ../server
+            rm -rf dist
+            npm install
+            npx tsc
+            
+            # 3. Restart PM2 processes
+            pm2 restart all
