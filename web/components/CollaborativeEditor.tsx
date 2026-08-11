@@ -10,8 +10,9 @@ const useSocket = (documentId: string) => {
   const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    // Connect to backend
-    const s = io("http://localhost:3001");
+    // Connect to backend. Use relative URL in production (Nginx proxy) and localhost in dev.
+    const baseUrl = typeof window !== "undefined" && window.location.hostname !== "localhost" ? "" : "http://localhost:3001";
+    const s = io(baseUrl);
     setSocket(s);
 
     return () => {
@@ -24,7 +25,7 @@ const useSocket = (documentId: string) => {
 
 // --- CONSTANTS ---
 const LANGUAGES = ["javascript", "c", "python", "cpp"];
-const SERVER_URL = "http://localhost:3001";
+const SERVER_URL = typeof window !== "undefined" && window.location.hostname !== "localhost" ? "" : "http://localhost:3001";
 
 interface CollaborativeEditorProps {
   roomId: string;
