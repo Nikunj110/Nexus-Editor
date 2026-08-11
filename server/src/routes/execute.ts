@@ -53,7 +53,7 @@ router.post("/", async (req: Request, res: Response) => {
             "--pids-limit", "64",            // Process limit
             "--user", "1000:1000",           // Non-root user
             "--read-only",                   // Read-only root filesystem
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",  // Writable /tmp
+            "--tmpfs", "/tmp:rw,exec,nosuid,size=64m",    // Writable /tmp, exec required for C/C++ binaries
             "--security-opt", "no-new-privileges",        // No privilege escalation
             "-v", `${hostFilePath}:${containerFilePath}:ro`,  // Mount code file read-only
             langConfig.image,
