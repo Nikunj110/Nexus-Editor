@@ -34,5 +34,11 @@ jobs:
             npm install
             npx tsc
             
-            # 3. Restart PM2 processes
+            # 3. Build/Pull Docker images for code execution
+            docker build -t alpine-cpp -f Dockerfile.cpp .
+            docker pull node:20-alpine
+            docker pull python:3.12-alpine
+            
+            # 4. Restart PM2 processes
+            cd ~/Nexus-Editor
             pm2 restart all

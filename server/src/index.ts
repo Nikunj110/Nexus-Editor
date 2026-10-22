@@ -21,19 +21,30 @@ const io = new Server(httpServer, {
 const prisma = new PrismaClient();
 const defaultValue = "// Start coding...";
 
+// Default starter code for each language
+const DEFAULT_CODE: Record<string, string> = {
+    javascript: '// Start coding...\nconsole.log("Hello World");',
+    python: '# Start coding...\nprint("Hello World")',
+    cpp: '#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    cout<<"Hello World";\n    return 0;\n}',
+    c: '#include<stdio.h>\nint main(){\n    printf("Hello World");\n    return 0;\n}',
+};
+
 // --- DEBOUNCE INFRASTRUCTURE ---
 // Maps roomId → timeout handle, so we only write to Postgres after typing stops
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const DEBOUNCE_MS = 2000; // 2 seconds after last keystroke
 
 async function debouncedSaveToPostgres(roomId: string, code: string, language?: string) {
-    // Clear any existing timer for this room
-    const existing = saveTimers.get(roomId);
+    // Use a unique key per room+language for debouncing
+    const timerKey = language ? `${roomId}:${language}` : roomId;
+    
+    // Clear any existing timer for this room+language
+    const existing = saveTimers.get(timerKey);
     if (existing) clearTimeout(existing);
 
     // Schedule a new write
     const timer = setTimeout(async () => {
-        saveTimers.delete(roomId);
+        saveTimers.delete(timerKey);
         try {
             const updateData: { content: string; language?: string; lastActiveAt: string } = {
                 content: code,
@@ -56,21 +67,25 @@ async function debouncedSaveToPostgres(roomId: string, code: string, language?: 
         }
     }, DEBOUNCE_MS);
 
-    saveTimers.set(roomId, timer);
+    saveTimers.set(timerKey, timer);
 }
 
 // Immediately flush a room's latest code from Redis to Postgres
 async function flushRoomToPostgres(roomId: string) {
-    // Cancel any pending debounced save
-    const existing = saveTimers.get(roomId);
-    if (existing) {
-        clearTimeout(existing);
-        saveTimers.delete(roomId);
+    // Cancel all pending debounced saves for this room
+    for (const [key, timer] of saveTimers.entries()) {
+        if (key === roomId || key.startsWith(`${roomId}:`)) {
+            clearTimeout(timer);
+            saveTimers.delete(key);
+        }
     }
 
     try {
-        const code = await redisClient.get(roomId);
-        const language = await redisClient.get(`${roomId}-language`);
+        const language = await redisClient.get(`${roomId}:language`) || await redisClient.get(`${roomId}-language`);
+        // Try to get code for the current language first
+        const currentLangCode = language ? await redisClient.get(`${roomId}:code:${language}`) : null;
+        const legacyCode = await redisClient.get(roomId);
+        const code = currentLangCode || legacyCode;
 
         if (code !== null) {
             const updateData: { content: string; language?: string; lastActiveAt: string } = {
@@ -162,27 +177,54 @@ io.on("connection", (socket) => {
         userSocketMap.set(socket.id, { roomId, username });
         console.log(`User ${username} joined room ${roomId}`);
 
-        // --- LOAD ROOM STATE ---
-        // Priority: Redis (newest real-time state) > Postgres (persistent source of truth)
+        // --- LOAD ROOM STATE (Per-Language) ---
+        // Each language has its own code stored in Redis as {roomId}:code:{language}
         try {
-            const redisCode = await redisClient.get(roomId);
-            const redisLanguage = await redisClient.get(`${roomId}-language`);
+            // Check new-style per-language keys first, fall back to legacy
+            const redisLanguage = await redisClient.get(`${roomId}:language`) || await redisClient.get(`${roomId}-language`);
+            const currentLanguage = redisLanguage || "javascript";
 
-            if (redisCode !== null) {
-                // Redis has the latest state — use it
-                socket.emit("load-document", redisCode);
-                socket.emit("language-update", redisLanguage || "javascript");
+            // Build a map of all language codes from Redis
+            const allCodes: Record<string, string> = {};
+            for (const lang of ["javascript", "python", "cpp", "c"]) {
+                const code = await redisClient.get(`${roomId}:code:${lang}`);
+                if (code !== null) {
+                    allCodes[lang] = code;
+                }
+            }
+
+            // If we have per-language codes in Redis, use them
+            if (Object.keys(allCodes).length > 0) {
+                socket.emit("load-all-codes", allCodes);
+                socket.emit("language-update", currentLanguage);
+                // Also emit load-document for the current language
+                const currentCode = allCodes[currentLanguage] || DEFAULT_CODE[currentLanguage] || defaultValue;
+                socket.emit("load-document", currentCode);
             } else {
-                // Fall back to Postgres
-                const document = await findOrCreateDocument(roomId);
-                if (document) {
-                    socket.emit("load-document", document.content);
-                    socket.emit("language-update", document.language);
+                // Fall back: check legacy single-code key
+                const legacyCode = await redisClient.get(roomId);
+                if (legacyCode !== null) {
+                    // Migrate: store old code under the current language
+                    allCodes[currentLanguage] = legacyCode;
+                    socket.emit("load-all-codes", allCodes);
+                    socket.emit("load-document", legacyCode);
+                    socket.emit("language-update", currentLanguage);
+                    // Migrate to new key format
+                    await redisClient.set(`${roomId}:code:${currentLanguage}`, legacyCode, { EX: 86400 });
+                } else {
+                    // Fall back to Postgres
+                    const document = await findOrCreateDocument(roomId);
+                    if (document) {
+                        const lang = document.language || "javascript";
+                        allCodes[lang] = document.content;
+                        socket.emit("load-all-codes", allCodes);
+                        socket.emit("load-document", document.content);
+                        socket.emit("language-update", lang);
+                    }
                 }
             }
         } catch (error) {
             console.error("Error loading room state:", error);
-            // Last resort: try Postgres directly
             try {
                 const document = await findOrCreateDocument(roomId);
                 if (document) {
@@ -213,21 +255,25 @@ io.on("connection", (socket) => {
     });
 
     // When a user types, they send "code-change". We broadcast it to the room.
-    socket.on("code-change", async ({ roomId, code }) => {
+    // Now includes language so we store code per-language.
+    socket.on("code-change", async ({ roomId, code, language: codeLang }) => {
         if (!roomId || code === undefined) return;
 
-        // 1. Broadcast immediately to other users
-        socket.to(roomId).emit("code-update", code);
+        // 1. Broadcast immediately to other users (include language so they update the right buffer)
+        socket.to(roomId).emit("code-update", { code, language: codeLang });
 
-        // 2. Cache in Redis for fast access
+        // 2. Cache in Redis per-language
         try {
+            const lang = codeLang || "javascript";
+            await redisClient.set(`${roomId}:code:${lang}`, code, { EX: 86400 });
+            // Also keep legacy key updated for backward compatibility
             await redisClient.set(roomId, code, { EX: 86400 });
         } catch (error) {
             console.error("Redis Set Error:", error);
         }
 
         // 3. Debounced write to Postgres (waits 2s after last keystroke)
-        debouncedSaveToPostgres(roomId, code);
+        debouncedSaveToPostgres(roomId, code, codeLang);
     });
 
     //Handle Language Changes
@@ -237,19 +283,32 @@ io.on("connection", (socket) => {
         // 1. Broadcast to everyone else in the room
         socket.to(roomId).emit("language-update", language);
 
-        // 2. Cache in Redis
+        // 2. Load the stored code for the NEW language and send it back
         try {
+            const storedCode = await redisClient.get(`${roomId}:code:${language}`);
+            const codeForLang = storedCode || DEFAULT_CODE[language] || defaultValue;
+            
+            // Send the code for this language to ALL users in the room (including sender)
+            io.to(roomId).emit("language-code-load", { language, code: codeForLang });
+        } catch (error) {
+            console.error("Redis language code load error:", error);
+        }
+
+        // 3. Cache language in Redis (use new key format)
+        try {
+            await redisClient.set(`${roomId}:language`, language, { EX: 86400 });
+            // Keep legacy key for backward compatibility
             await redisClient.set(`${roomId}-language`, language, { EX: 86400 });
         } catch (error) {
             console.error("Redis Language Set Error:", error);
         }
 
-        // 3. Immediate Postgres write (language changes are infrequent)
+        // 4. Immediate Postgres write (language changes are infrequent)
         try {
             await prisma.document.upsert({
                 where: { id: roomId },
                 update: { language, lastActiveAt: new Date().toISOString() },
-                create: { id: roomId, content: defaultValue, language },
+                create: { id: roomId, content: DEFAULT_CODE[language] || defaultValue, language },
             });
         } catch (error) {
             console.error("Postgres Language Save Error:", error);

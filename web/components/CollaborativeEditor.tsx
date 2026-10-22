@@ -25,6 +25,14 @@ const useSocket = (documentId: string) => {
 // --- CONSTANTS ---
 const LANGUAGES = ["javascript", "c", "python", "cpp"];
 
+// Default starter code for each language
+const DEFAULT_CODE: Record<string, string> = {
+    javascript: '// Start coding...\nconsole.log("Hello World");',
+    python: '# Start coding...\nprint("Hello World")',
+    cpp: '#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    cout<<"Hello World";\n    return 0;\n}',
+    c: '#include<stdio.h>\nint main(){\n    printf("Hello World");\n    return 0;\n}',
+};
+
 interface CollaborativeEditorProps {
   roomId: string;
   username: string;
@@ -32,7 +40,7 @@ interface CollaborativeEditorProps {
 
 const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => {
   const socket = useSocket(roomId);
-  const [content, setContent] = useState("// Start coding...");
+  const [content, setContent] = useState(DEFAULT_CODE["javascript"]);
   const [language, setLanguage] = useState("javascript");
   const [userCount, setUserCount] = useState(0);
   const [users, setUsers] = useState<string[]>([]);
@@ -59,6 +67,10 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
   const monacoRef = useRef<any>(null); // NEW: Holds the Monaco API to fix the TS Error!
   const decorationsRef = useRef<string[]>([]); // Keeps track of drawn cursors so we can update/remove them
 
+  // --- PER-LANGUAGE CODE BUFFERS ---
+  // Each language has its own independent code. Switching languages saves current and restores target.
+  const codePerLanguageRef = useRef<Record<string, string>>({...DEFAULT_CODE});
+
   // --- SOCKET LISTENERS ---
   useEffect(() => {
     if (!socket) return;
@@ -68,14 +80,64 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
     const handleUserLeft = (name: string) => toast.error(`${name} left the room`);
 
     // -- EDITOR SYNC --
-    const handleCodeUpdate = (newCode: string) => {
-      // Only update if different to prevent cursor jumps
-      setContent((prev) => (prev !== newCode ? newCode : prev));
+    const handleCodeUpdate = (data: { code: string; language: string } | string) => {
+      // Handle both new format {code, language} and legacy format (string)
+      if (typeof data === "string") {
+        // Legacy format: just a string
+        setContent((prev) => (prev !== data ? data : prev));
+      } else {
+        // New format: update the correct language buffer
+        const { code, language: codeLang } = data;
+        codePerLanguageRef.current[codeLang] = code;
+        // Only update the visible editor if it's the same language
+        setLanguage((currentLang) => {
+          if (currentLang === codeLang) {
+            setContent((prev) => (prev !== code ? code : prev));
+          }
+          return currentLang;
+        });
+      }
     };
     const handleUserCount = (count: number) => setUserCount(count);
     const handleUserList = (userList: string[]) => setUsers(userList);
-    const handleLoadDocument = (storedCode: string) => setContent(storedCode);
-    const handleLanguageUpdate = (newLanguage: string) => setLanguage(newLanguage);
+    const handleLoadDocument = (storedCode: string) => {
+      setContent(storedCode);
+      // Also update the per-language buffer for the current language
+      setLanguage((currentLang) => {
+        codePerLanguageRef.current[currentLang] = storedCode;
+        return currentLang;
+      });
+    };
+    const handleLanguageUpdate = (newLanguage: string) => {
+      // Save current code for the old language before switching
+      setContent((currentCode) => {
+        setLanguage((oldLang) => {
+          if (oldLang !== newLanguage) {
+            codePerLanguageRef.current[oldLang] = currentCode;
+          }
+          return newLanguage;
+        });
+        // Load code for the new language
+        const newCode = codePerLanguageRef.current[newLanguage] || DEFAULT_CODE[newLanguage] || "// Start coding...";
+        return newCode;
+      });
+    };
+    // Handle bulk load of all language codes from server
+    const handleLoadAllCodes = (allCodes: Record<string, string>) => {
+      Object.entries(allCodes).forEach(([lang, code]) => {
+        codePerLanguageRef.current[lang] = code;
+      });
+    };
+    // Handle language-specific code load from server (when language changes)
+    const handleLanguageCodeLoad = ({ language: lang, code }: { language: string; code: string }) => {
+      codePerLanguageRef.current[lang] = code;
+      setLanguage((currentLang) => {
+        if (currentLang === lang) {
+          setContent(code);
+        }
+        return currentLang;
+      });
+    };
 
     // -- REAL-TIME CURSORS --
     const handleCursorUpdate = ({ socketId, username: remoteUser, position }: any) => {
@@ -106,6 +168,8 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
     socket.on("code-update", handleCodeUpdate);
     socket.on("load-document", handleLoadDocument);
     socket.on("language-update", handleLanguageUpdate);
+    socket.on("load-all-codes", handleLoadAllCodes);
+    socket.on("language-code-load", handleLanguageCodeLoad);
     socket.on("user-count-update", handleUserCount);
     socket.on("user-list-update", handleUserList);
     socket.on("cursor-update", handleCursorUpdate);
@@ -120,6 +184,8 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
       socket.off("code-update", handleCodeUpdate);
       socket.off("load-document", handleLoadDocument);
       socket.off("language-update", handleLanguageUpdate);
+      socket.off("load-all-codes", handleLoadAllCodes);
+      socket.off("language-code-load", handleLanguageCodeLoad);
       socket.off("user-count-update", handleUserCount);
       socket.off("user-list-update", handleUserList);
       socket.off("cursor-update", handleCursorUpdate);
@@ -150,12 +216,19 @@ const CollaborativeEditor = ({ roomId, username }: CollaborativeEditorProps) => 
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       setContent(value);
-      if (socket) socket.emit("code-change", { roomId, code: value });
+      // Save to per-language buffer
+      codePerLanguageRef.current[language] = value;
+      if (socket) socket.emit("code-change", { roomId, code: value, language });
     }
   };
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newLanguage = e.target.value;
+    // Save current code for the old language
+    codePerLanguageRef.current[language] = content;
+    // Load code for the new language
+    const newCode = codePerLanguageRef.current[newLanguage] || DEFAULT_CODE[newLanguage] || "// Start coding...";
+    setContent(newCode);
     setLanguage(newLanguage);
     if (socket) socket.emit("language-change", { roomId, language: newLanguage });
   };
