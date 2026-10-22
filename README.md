@@ -2,7 +2,7 @@
 
 🔥 **Live Demo:** [https://editor.nikunjgajera.me](https://editor.nikunjgajera.me)
 
-A real-time collaborative code editor with persistent rooms, live code synchronization, and self-hosted Docker-based code execution.
+A real-time collaborative code editor with persistent rooms, live cursor and code synchronization, independent per-language code buffers, and self-hosted Docker-based sandboxed code execution.
 
 ## Architecture
 
@@ -18,48 +18,51 @@ A real-time collaborative code editor with persistent rooms, live code synchroni
                │                    │
         ┌──────┴──────┐             v
         │             │           Redis
-        v             v        (real-time state)
-   PostgreSQL     Docker
-  (persistent)   (code execution)
+        v             v     (real-time state &
+   PostgreSQL     Docker    per-language cache)
+  (persistent)   (sandboxed
+                 execution)
 ```
 
 ### Responsibility Separation
 
 | Layer | Responsibility |
 |-------|---------------|
-| **PostgreSQL** | Persistent room data (code, language, timestamps). Survives restarts. |
-| **Redis** | Real-time ephemeral state (latest code cache, language cache, 24h TTL). Fast reads for active rooms. |
-| **WebSocket (Socket.IO)** | Real-time collaboration (code sync, cursor sharing, user presence, notifications). |
-| **Express API** | REST endpoints for room lookup and code execution. |
-| **Docker** | Isolated code execution. Ephemeral containers per run. |
-| **Next.js** | Frontend application, routing, editor UI. |
+| **PostgreSQL** | Persistent room data (code content, active language, timestamps). Survives server restarts. |
+| **Redis** | Real-time ephemeral state (`{roomId}:code:{language}` buffers, `{roomId}:language`, 24h TTL). Instant reads for active rooms. |
+| **WebSocket (Socket.IO)** | Real-time collaboration (per-language code sync, cursor positions, user presence, join/leave toasts). |
+| **Express API** | REST endpoints for room lookup and secure Docker code execution. |
+| **Docker** | Isolated code execution in ephemeral, resource-constrained containers. |
+| **Next.js** | Frontend application with Monaco Editor, customizable terminal layout, and live presence UI. |
 
 ## Features
 
-- **Real-time collaboration** — Multiple users can edit the same code simultaneously
-- **Persistent rooms** — Code is saved to PostgreSQL and survives browser refresh, disconnects, and server restarts
-- **Room-based URLs** — Each room has a unique URL (`/room/abc123`) that can be shared
-- **Live cursor sharing** — See other users' cursor positions in real-time
-- **Online user count** — See who's in the room
-- **Self-hosted code execution** — Run code in isolated Docker containers (no external API dependency)
-- **Multi-language support** — JavaScript, TypeScript, Python, PHP
-- **Resizable terminal** — Drag to resize the terminal output panel
+- **Real-time collaboration** — Multiple users can edit code simultaneously with instant synchronization
+- **Per-language code isolation** — Each language (`javascript`, `python`, `cpp`, `c`) maintains an independent code buffer with language-specific boilerplate; switching languages preserves your code
+- **Persistent rooms** — Code is automatically saved to PostgreSQL (debounced) and Redis cache (instant); survives refresh and server restarts
+- **Room-based URLs** — Shareable unique URLs (`/room/abc123`)
+- **Live cursor sharing** — View other users' cursor positions with custom names and colored badges in real-time
+- **Online user presence** — Live online count badge with a clickable modal listing all active participants
+- **Self-hosted sandboxed code execution** — Execute code in isolated Docker containers with no third-party API dependencies
+- **Standard Input (stdin) support** — Dedicated terminal input tab for running interactive programs and competitive programming inputs
+- **Multi-language support** — JavaScript, Python, C, and C++
+- **Flexible terminal layout** — Toggle between bottom panel and side-by-side panel layout, with drag-to-resize functionality
 
 ## Supported Languages
 
-| Language | Docker Image | Size |
-|----------|-------------|------|
-| JavaScript | `node:20-alpine` | ~50MB |
-| TypeScript | `node:20-alpine` | ~50MB |
-| Python | `python:3.12-alpine` | ~55MB |
-| PHP | `php:8.3-cli-alpine` | ~30MB |
+| Language | Runtime / Compiler | Docker Image | Notes |
+|----------|-------------------|--------------|-------|
+| **JavaScript** | Node.js v20 | `node:20-alpine` | Lightweight (~50MB) |
+| **Python** | Python 3.12 | `python:3.12-alpine` | Lightweight (~55MB) |
+| **C** | GCC (musl) | `alpine-cpp` | Built from `server/Dockerfile.cpp` (~180MB) |
+| **C++** | G++ (musl) | `alpine-cpp` | Built from `server/Dockerfile.cpp` (~180MB) |
 
 ## Prerequisites
 
 - **Node.js** v20+
-- **Docker Desktop** (for code execution)
-- **PostgreSQL** (cloud-hosted or local via Docker)
-- **Redis** (cloud-hosted or local via Docker)
+- **Docker Engine / Docker Desktop** (for code execution)
+- **PostgreSQL** (cloud-hosted e.g. Neon, or local via Docker)
+- **Redis** (cloud-hosted e.g. Aiven/Upstash, or local via Docker)
 
 ## Environment Variables
 
@@ -82,7 +85,7 @@ DOCKER_MEMORY_LIMIT=128m          # 128MB per container
 
 ## Getting Started
 
-### Option A: Cloud-hosted databases (Recommended for deployment)
+### Option A: Cloud-hosted databases (Recommended for production)
 
 1. Set up a PostgreSQL database (e.g., [Neon](https://neon.tech))
 2. Set up a Redis instance (e.g., [Aiven](https://aiven.io) or [Upstash](https://upstash.com))
@@ -94,156 +97,187 @@ DOCKER_MEMORY_LIMIT=128m          # 128MB per container
 docker compose up -d
 ```
 
-Then use these in your `server/.env`:
+Then configure `server/.env`:
 ```env
 DATABASE_URL="postgresql://myuser:mypassword@localhost:5432/sync_db"
 REDIS_URL="redis://localhost:6379"
 ```
 
-### Start the application
+### Install and Run
 
 ```bash
-# Terminal 1: Start the backend
+# Terminal 1: Backend
 cd server
 npm install
 npx prisma db push
 npx prisma generate
 npm run dev
 
-# Terminal 2: Start the frontend
+# Terminal 2: Frontend
 cd web
 npm install
 npm run dev
 ```
 
-### Pre-pull Docker images (first time only)
+### Build & Pull Docker Images (Required for execution)
+
+Pull the runtime images and build the local C/C++ compiler image:
 
 ```bash
+# Pull Node & Python images
 docker pull node:20-alpine
 docker pull python:3.12-alpine
-docker pull php:8.3-cli-alpine
+
+# Build C/C++ compiler image
+cd server
+docker build -t alpine-cpp -f Dockerfile.cpp .
 ```
 
 ## How It Works
 
-### Room Flow
+### Room Lifecycle & Per-Language State
 
-1. User visits `http://localhost:3000/`
-2. Enters display name and room ID (or generates a random one)
-3. Clicks "Join Room" → navigates to `/room/[roomId]`
-4. Backend checks if room exists:
-   - **Exists**: Load saved code and language from Redis (or PostgreSQL fallback)
-   - **New**: Create room in PostgreSQL with default code
-5. User joins the Socket.IO room for real-time collaboration
+1. User visits `/` and enters a display name and room ID (or generates a random ID).
+2. Navigates to `/room/[roomId]`.
+3. Client establishes a WebSocket connection and emits `join-room`.
+4. Backend restores the room state:
+   - Fetches all language buffers from Redis (`{roomId}:code:{language}`).
+   - Fetches active language (`{roomId}:language`).
+   - If Redis is cold, falls back to PostgreSQL and initializes language templates.
+   - Emits `load-all-codes` and `language-update` to sync the client.
+5. When a user switches languages:
+   - Current code is cached locally and on the server.
+   - Server loads target language buffer and broadcasts `language-code-load` to keep all users in sync with appropriate code.
 
-### Data Persistence
+### Data Persistence Architecture
 
 ```
-User types code
+User types code in language X
      |
      v
-Broadcast to other users (instant, via WebSocket)
+Broadcast to room: { code, language } (Instant WebSocket)
      |
      v
-Cache in Redis (immediate, 24h TTL)
+Cache in Redis: {roomId}:code:{language} (Immediate, 24h TTL)
      |
      v
 Debounced write to PostgreSQL (2 seconds after typing stops)
 ```
 
-- **On last user disconnect**: Redis state is immediately flushed to PostgreSQL
-- **On room rejoin**: Redis is checked first (latest), PostgreSQL is fallback (source of truth)
+- **Per-Language Redis Keys**: `{roomId}:code:{language}` stores independent buffers for `javascript`, `python`, `cpp`, and `c`.
+- **Last user disconnect**: All pending debounced saves are flushed immediately from Redis to PostgreSQL.
+- **On room rejoin**: Redis is checked first (fast in-memory state), PostgreSQL is the persistent backing store.
 
-### Code Execution
+### Sandboxed Code Execution
 
 ```
-Frontend → POST /api/execute → Express server → Docker
+Frontend → POST /api/execute → Express server → Temporary Docker Container
      |
      v
-Create temporary container:
-  - --rm (auto-cleanup)
-  - --network none (no internet)
-  - --memory 128m
-  - --cpus 0.5
-  - --pids-limit 64
-  - --user 1000:1000 (non-root)
-  - --read-only filesystem
-  - 10 second timeout
+Container Launch Flags:
+  - --rm (auto-cleanup on exit)
+  - --network none (no internet access)
+  - --memory 128m (RAM limit)
+  - --cpus 0.5 (CPU cap)
+  - --pids-limit 64 (fork bomb protection)
+  - --user 1000:1000 (non-root user)
+  - --read-only (immutable root filesystem)
+  - --tmpfs /tmp:rw,exec,nosuid,size=64m (ephemeral writable /tmp for binary compilation)
+  - --security-opt no-new-privileges
+  - 10 second execution timeout
      |
      v
-Execute code → Capture stdout/stderr → Return result → Container removed
+Child Process: writes stdin (if any) → captures stdout/stderr → returns JSON → container destroyed
 ```
 
-### Security Restrictions
+### Security Guardrails
 
-| Restriction | Purpose |
-|------------|---------|
-| `--network none` | No internet access from user code |
-| `--memory 128m` | Prevent memory bombs |
-| `--cpus 0.5` | Prevent CPU monopolization |
-| `--pids-limit 64` | Prevent fork bombs |
-| `--user 1000:1000` | Non-root execution |
-| `--read-only` | Immutable root filesystem |
-| `--rm` | Auto-cleanup after exit |
-| `--security-opt no-new-privileges` | No privilege escalation |
-| 10s timeout | Kill long-running/infinite loops |
+| Guardrail | Implementation | Protection |
+|-----------|----------------|------------|
+| **Network Isolation** | `--network none` | Prevents SSRF, data exfiltration, port scanning |
+| **Memory Limit** | `--memory 128m` | Prevents host OOM crashes and memory exhaustion attacks |
+| **CPU Quota** | `--cpus 0.5` | Prevents CPU monopolization / crypto-mining |
+| **Process Cap** | `--pids-limit 64` | Prevents fork bombs (`:(){ :\|:& };:`) |
+| **Non-Root Execution** | `--user 1000:1000` | Prevents privilege escalation and container breakout |
+| **Read-Only Root** | `--read-only` | Prevents modifications to system libraries and binaries |
+| **Execution Timeout** | 10s default (`DOCKER_EXECUTION_TIMEOUT`) | Kills infinite loops (`while(true)`) |
+| **Ephemeral Writable Storage** | `--tmpfs /tmp:rw,exec,nosuid,size=64m` | In-memory compilation area for GCC/G++, safely wiped on container destruction |
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/` | Health check |
-| `GET` | `/api/rooms/:roomId` | Check if a room exists |
-| `POST` | `/api/execute` | Execute code in Docker container |
+| `GET` | `/` | API health check |
+| `GET` | `/api/rooms/:roomId` | Check if a room exists in PostgreSQL |
+| `POST` | `/api/execute` | Execute code in an isolated Docker container |
 
 ### POST /api/execute
 
-**Request:**
+**Request Body:**
 ```json
 {
-  "language": "javascript",
-  "code": "console.log('Hello, World!');"
+  "language": "cpp",
+  "code": "#include <iostream>\nusing namespace std;\nint main() {\n    int a, b;\n    if (cin >> a >> b) cout << a + b << endl;\n    else cout << \"Hello from C++!\";\n    return 0;\n}",
+  "stdin": "5 10"
 }
 ```
 
 **Response:**
 ```json
 {
-  "stdout": "Hello, World!\n",
+  "stdout": "15\n",
   "stderr": "",
   "exitCode": 0,
   "timedOut": false
 }
 ```
 
+## Deployment & CI/CD
+
+Deployment is automated via GitHub Actions (`.github/workflows/deploy.yml`):
+
+1. **Trigger**: Push to `main` branch
+2. **Target**: Azure VM running Ubuntu with Docker, Node.js, and PM2
+3. **Automated Pipeline**:
+   - Pulls latest commit from `main`
+   - Builds Next.js frontend (`npm run build`)
+   - Compiles TypeScript backend (`npx tsc`)
+   - Builds custom `alpine-cpp` Docker image from `server/Dockerfile.cpp`
+   - Pre-pulls `node:20-alpine` and `python:3.12-alpine` execution images
+   - Restarts backend and frontend via `pm2 restart all`
+
 ## Project Structure
 
 ```
 Nexus-Editor/
-├── docker-compose.yml          # Local Postgres + Redis (optional)
+├── .github/
+│   └── workflows/
+│       └── deploy.yml          # GitHub Actions CI/CD to Azure VM
+├── docker-compose.yml          # Local Postgres + Redis setup (optional)
 ├── server/
 │   ├── .env                    # Environment variables (not committed)
 │   ├── .env.example            # Environment template
+│   ├── Dockerfile.cpp          # Alpine image with GCC, G++, and musl-dev
 │   ├── prisma/
-│   │   └── schema.prisma       # Database schema
+│   │   └── schema.prisma       # Prisma schema for Room / Document model
 │   └── src/
-│       ├── index.ts            # Express + Socket.IO server
+│       ├── index.ts            # Express + Socket.IO server (per-language buffers, presence, debounce)
 │       ├── config/
-│       │   ├── redis.ts        # Redis client setup
-│       │   └── languages.ts    # Language → Docker image mapping
+│       │   ├── redis.ts        # Redis client connection
+│       │   └── languages.ts    # Language execution configurations & commands
 │       └── routes/
-│           ├── execute.ts      # Code execution endpoint
-│           └── rooms.ts        # Room lookup endpoint
+│           ├── execute.ts      # Docker execution route with stdin & security flags
+│           └── rooms.ts        # Room existence check endpoint
 └── web/
     ├── app/
-    │   ├── page.tsx            # Landing page (join/create room)
+    │   ├── page.tsx            # Landing page (Join / Create Room)
     │   ├── layout.tsx          # Root layout
-    │   ├── globals.css         # Global styles
+    │   ├── globals.css         # Styling and design system
     │   └── room/
     │       └── [roomId]/
-    │           └── page.tsx    # Room editor page
+    │           └── page.tsx    # Room wrapper page
     └── components/
-        └── CollaborativeEditor.tsx  # Monaco editor + collaboration
+        └── CollaborativeEditor.tsx  # Monaco Editor, WebSocket sync, terminal, cursors
 ```
 
 ## License
